@@ -5,22 +5,22 @@ import { useNavigation } from '@/stores/navigation'
 import { projectsApi, type Project } from '@/api/projects'
 import { analyzeApi } from '@/api/analyze'
 import type { SseEvent } from '@/api/client'
-import { Folder, Workflow, Target, FolderOpen, ChevronDown, Search, Plus, SendHorizontal, Check, X } from 'lucide-react'
+import { Folder, Target, Check, X, Paperclip, FileText, Landmark } from 'lucide-react'
 import { Button, Spinner, AssistantAvatar, RichText } from '@/components/ui'
+import ChatComposer, { fileKey } from '@/components/home/ChatComposer'
+import { useVoiceRecorder } from '@/hooks/useVoiceRecorder'
 
-function StatusIcon({ status }: { status: string }) {
-  if (status === 'tobe_approved' || status === 'tobe_complete') return <Target size={16} strokeWidth={1.8} style={{ color: '#16a34a' }} />
-  if (status === 'asis_complete' || status === 'asis_approved') return <Workflow size={16} strokeWidth={1.8} style={{ color: 'var(--accent)' }} />
-  return <Folder size={16} strokeWidth={1.8} style={{ color: 'var(--muted)' }} />
-}
+const MODEL_KEY = 'sps.homeModel'
 
 type Stage = 'idle' | 'thinking' | 'creating'
 /** A project the agent proposed; created only when the user presses Yes */
-interface Proposal { name: string; description: string; goal: string; answer?: 'yes' | 'no' }
-interface Msg { role: 'user' | 'assistant'; content: string; proposal?: Proposal }
+interface ProposalFields { name: string; goal: string; description: string; country: string; ministry: string; department: string }
+interface Proposal extends ProposalFields { answer?: 'yes' | 'no' }
+interface Msg { role: 'user' | 'assistant'; content: string; proposal?: Proposal; files?: string[] }
 
 /** What the agent sees of a message in the history (the card becomes plain text) */
 function toHistory(m: Msg): { role: 'user' | 'assistant'; content: string } {
+  if (m.files?.length) return { role: m.role, content: `${m.content}\n\n[Attached files: ${m.files.join(', ')}]`.trim() }
   if (!m.proposal) return { role: m.role, content: m.content }
   const { name, answer } = m.proposal
   const outcome = answer === 'no' ? 'The user pressed No — the project was not created.'
@@ -37,16 +37,26 @@ export default function AllProjects() {
   const [input, setInput] = useState('')
   const [stage, setStage] = useState<Stage>('idle')
   const [messages, setMessages] = useState<Msg[]>([])
+  // files in the box, and files already sent — uploaded into the project once it is created
+  const [files, setFiles] = useState<File[]>([])
+  const [sentFiles, setSentFiles] = useState<File[]>([])
 
-  const [dropdownOpen, setDropdownOpen] = useState(false)
-  const [search, setSearch] = useState('')
-  const dropdownRef = useRef<HTMLDivElement>(null)
+  const { data: modelList } = useQuery({ queryKey: ['home-models'], queryFn: analyzeApi.homeModels, staleTime: Infinity })
+  const [pickedModel, setPickedModel] = useState<string>(() => {
+    try { return localStorage.getItem(MODEL_KEY) ?? '' } catch { return '' }
+  })
+  const models = modelList?.models ?? []
+  const model = models.some((m) => m.id === pickedModel) ? pickedModel : (modelList?.default ?? '')
+  function changeModel(id: string) {
+    setPickedModel(id)
+    try { localStorage.setItem(MODEL_KEY, id) } catch { /* private window */ }
+  }
 
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const stopRef = useRef<(() => void) | null>(null)
   const endRef = useRef<HTMLDivElement>(null)
 
-  const { data: projects = [], isFetched } = useQuery<Project[]>({
+  const { data: projects = [] } = useQuery<Project[]>({
     queryKey: ['projects'],
     queryFn: () => projectsApi.list(),
   })
@@ -56,22 +66,28 @@ export default function AllProjects() {
     navigate(`/projects/${project.id}/overview`)
   }
 
-  // Dropdown "No match → Enter" path: the name is explicit, create directly
-  const createProject = useMutation({
-    mutationFn: (name: string) => projectsApi.create({ name }),
-    onSuccess: openProject,
-    onError: () => setStage('idle'),
-  })
-
   // Yes / No on the agent's project card
   const confirmProposal = useMutation({
-    mutationFn: (p: Proposal) => projectsApi.create({ name: p.name, description: p.description, goal: p.goal }),
+    mutationFn: async (p: Proposal) => {
+      const project = await projectsApi.create({
+        name: p.name.trim() || 'Untitled Project', description: p.description.trim(), goal: p.goal.trim(),
+        country: p.country.trim(), ministry: p.ministry.trim(), department: p.department.trim(),
+      })
+      // a failed upload still opens the project — the Files tab shows what arrived
+      await Promise.allSettled(sentFiles.map((f) => projectsApi.uploadFile(project.id, f)))
+      return project
+    },
     onSuccess: openProject,
     onError: () => {
       setStage('idle')
       setMessages((prev) => [...prev, { role: 'assistant', content: 'Sorry, the project could not be created. Please try again.' }])
     },
   })
+
+  // the user corrects the assistant's details on the card before pressing Yes
+  function editProposal(index: number, patch: Partial<ProposalFields>) {
+    setMessages((prev) => prev.map((m, i) => (i === index && m.proposal && !m.proposal.answer ? { ...m, proposal: { ...m.proposal, ...patch } } : m)))
+  }
 
   function answerProposal(index: number, answer: 'yes' | 'no') {
     const msg = messages[index]
@@ -85,17 +101,6 @@ export default function AllProjects() {
     }
   }
 
-  // Close dropdown on outside click
-  useEffect(() => {
-    function onPointerDown(e: PointerEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setDropdownOpen(false)
-      }
-    }
-    if (dropdownOpen) document.addEventListener('pointerdown', onPointerDown)
-    return () => document.removeEventListener('pointerdown', onPointerDown)
-  }, [dropdownOpen])
-
   useEffect(() => {
     if (newProjectOpen) {
       closeNewProject()
@@ -103,7 +108,8 @@ export default function AllProjects() {
       setStage('idle')
       setInput('')
       setMessages([])
-      setDropdownOpen(false)
+      setFiles([])
+      setSentFiles([])
       setTimeout(() => inputRef.current?.focus(), 60)
     }
   }, [newProjectOpen, closeNewProject])
@@ -118,17 +124,40 @@ export default function AllProjects() {
 
   useEffect(() => () => stopRef.current?.(), [])
 
-  const filtered = projects.filter((p) =>
-    search.trim() === '' || p.name.toLowerCase().includes(search.toLowerCase()),
-  )
+  // Voice commands: answer the open project card, open a project by name, or talk to the agent
+  function handleVoice(spoken: string) {
+    if (stage !== 'idle') return
+    const said = spoken.trim().replace(/[.!?,]+$/, '')
+    const pending = messages.findIndex((m) => m.proposal && !m.proposal.answer)
+    if (pending >= 0 && /^(yes|yeah|yep|sure|ok(ay)?|confirm|create( it)?|go ahead)\b/i.test(said)) return answerProposal(pending, 'yes')
+    if (pending >= 0 && /^(no|nope|cancel|don'?t)\b/i.test(said)) return answerProposal(pending, 'no')
 
-  function handleSubmit() {
-    const text = input.trim()
-    if (!text || stage !== 'idle') return
+    const open = said.match(/^(?:open|go to|show)\s+(?:the\s+)?(?:project\s+)?(.+?)(?:\s+project)?$/i)
+    if (open) {
+      const name = open[1].toLowerCase()
+      const match = projects.find((p) => p.name.toLowerCase() === name)
+        ?? projects.find((p) => p.name.toLowerCase().includes(name))
+      if (match) return navigate(`/projects/${match.id}/overview`)
+    }
+    handleSubmit(said)
+  }
+
+  const voice = useVoiceRecorder(handleVoice)
+
+  function handleSubmit(spoken?: string) {
+    const text = (spoken ?? input).trim()
+    if ((!text && !files.length) || stage !== 'idle') return
 
     // Typing instead of pressing a button counts as "not answered" — close the open card
     const closed = messages.map((m) => (m.proposal && !m.proposal.answer ? { ...m, proposal: { ...m.proposal, answer: 'no' as const } } : m))
-    const history: Msg[] = [...closed, { role: 'user', content: text }]
+    const history: Msg[] = [...closed, { role: 'user', content: text, ...(files.length ? { files: files.map((f) => f.name) } : {}) }]
+    if (files.length) {
+      setSentFiles((prev) => {
+        const known = new Set(prev.map(fileKey))
+        return [...prev, ...files.filter((f) => !known.has(fileKey(f)))]
+      })
+      setFiles([])
+    }
     setInput('')
     setStage('thinking')
     setMessages([...history, { role: 'assistant', content: '' }])
@@ -147,7 +176,10 @@ export default function AllProjects() {
         setMessages((prev) => {
           const next = [...prev]
           const last = next[next.length - 1]
-          next[next.length - 1] = { ...last, proposal: { name: e.name, description: e.description ?? '', goal: e.goal ?? '' } }
+          next[next.length - 1] = { ...last, proposal: {
+            name: e.name, description: e.description ?? '', goal: e.goal ?? '',
+            country: e.country || 'Bangladesh', ministry: e.ministry ?? '', department: e.department ?? '',
+          } }
           return next
         })
       }
@@ -163,19 +195,27 @@ export default function AllProjects() {
         })
         setStage('idle')
       }
-    })
+    }, model || undefined)
   }
 
   const isSpinning = stage !== 'idle'
-  const spinLabel = stage === 'creating' ? 'Creating project…' : 'Thinking…'
+  const spinLabel = stage === 'creating'
+    ? (sentFiles.length ? `Creating project and uploading ${sentFiles.length} file${sentFiles.length > 1 ? 's' : ''}…` : 'Creating project…')
+    : 'Thinking…'
+  const chatting = messages.length > 0
 
   return (
+    <div style={{
+      flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column',
+      justifyContent: chatting ? 'flex-start' : 'center',
+      background: 'var(--bg)',
+    }}>
+    {/* Greeting + conversation — scrolls on its own once a conversation is running */}
     <div
       style={{
-        flex: 1, display: 'flex', flexDirection: 'column',
-        alignItems: 'center', justifyContent: messages.length ? 'flex-start' : 'center',
-        padding: '40px 24px 48px', minHeight: 0, overflowY: 'auto',
-        background: 'var(--bg)',
+        flex: chatting ? 1 : 'none', minHeight: 0, overflowY: 'auto',
+        display: 'flex', flexDirection: 'column', alignItems: 'center',
+        padding: chatting ? '32px 24px 16px' : '40px 24px 0',
       }}
     >
       {/* Greeting */}
@@ -194,22 +234,31 @@ export default function AllProjects() {
 
       {/* Conversation with the home agent */}
       {messages.length > 0 && (
-        <div style={{ width: '100%', maxWidth: 640, marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ width: '100%', maxWidth: 680, display: 'flex', flexDirection: 'column', gap: 10 }}>
           {messages.map((m, i) => m.role === 'user' ? (
             <div key={i} style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <div style={{
+              <div dir="auto" style={{
                 background: 'var(--accent)', color: 'var(--accent-ink)',
                 borderRadius: 12, borderTopRightRadius: 4,
                 padding: '10px 14px', fontSize: 14, maxWidth: '80%', lineHeight: 1.55,
                 whiteSpace: 'pre-wrap',
               }}>
                 {m.content}
+                {m.files?.length ? (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: m.content ? 8 : 0 }}>
+                    {m.files.map((name) => (
+                      <span key={name} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12.5, padding: '3px 8px', borderRadius: 8, background: 'rgba(255,255,255,.18)' }}>
+                        <Paperclip size={12} /> {name}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             </div>
           ) : (
             <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
               <AssistantAvatar />
-              <div style={{
+              <div dir="auto" style={{
                 background: 'var(--surface)', border: '1px solid var(--line)',
                 borderRadius: 12, borderTopLeftRadius: 4,
                 padding: '11px 14px', fontSize: 14, lineHeight: 1.65,
@@ -226,6 +275,7 @@ export default function AllProjects() {
                     spaced={!!m.content}
                     busy={stage !== 'idle'}
                     onAnswer={(a) => answerProposal(i, a)}
+                    onEdit={(patch) => editProposal(i, patch)}
                   />
                 )}
               </div>
@@ -235,197 +285,107 @@ export default function AllProjects() {
         </div>
       )}
 
-      {/* Main box — pinned to the bottom once a conversation is running */}
-      <div style={{
-        width: '100%', maxWidth: 640, marginBottom: 10,
-        ...(messages.length ? { position: 'sticky', bottom: 0, marginTop: 'auto', paddingBottom: 12, background: 'var(--bg)' } : {}),
-      }}>
-        <div style={{
-          background: 'var(--surface)', border: '1px solid var(--line)',
-          borderRadius: 14, padding: '14px 14px 10px',
-          boxShadow: '0 4px 20px rgba(16,24,40,.06)',
-        }}>
-          <textarea
-            ref={inputRef}
-            rows={3}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit() }
-            }}
-            placeholder={messages.length ? 'Reply…' : 'Describe the service you want to simplify, or ask anything about SPS…'}
-            disabled={isSpinning}
-            style={{
-              width: '100%', boxSizing: 'border-box',
-              border: 0, background: 'transparent',
-              color: 'var(--ink)', resize: 'none',
-              outline: 'none', fontSize: 14.5, lineHeight: 1.55,
-              opacity: isSpinning ? 0.5 : 1,
-            }}
-          />
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
-            <Button
-              variant="primary"
-              icon={SendHorizontal}
-              loading={isSpinning}
-              onClick={handleSubmit}
-              disabled={!input.trim() || isSpinning}
-            >
-              {isSpinning ? spinLabel : 'Send'}
-            </Button>
-          </div>
-        </div>
+    </div>
+
+    {/* Composer — below the greeting at first, at the bottom once a conversation is running */}
+    <div style={{
+      flexShrink: 0, position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center',
+      padding: chatting ? '6px 24px 12px' : '0 24px 48px',
+    }}>
+      {/* messages fade out above the box instead of being cut off */}
+      {chatting && <div style={{ position: 'absolute', left: 0, right: 0, top: -28, height: 28, background: 'linear-gradient(to bottom, transparent, var(--bg))', pointerEvents: 'none' }} />}
+      <div style={{ width: '100%', maxWidth: 680 }}>
+        <ChatComposer
+          inputRef={inputRef}
+          value={input}
+          onChange={setInput}
+          onSubmit={() => handleSubmit()}
+          placeholder={chatting ? 'Reply…' : 'Describe the service you want to simplify, or ask anything about SPS…'}
+          busy={isSpinning}
+          files={files}
+          onFilesChange={setFiles}
+          voice={voice}
+          models={models}
+          model={model}
+          onModelChange={changeModel}
+          menuUp={chatting}
+        />
       </div>
-
-      {/* Project picker row — below input */}
-      <div style={{ width: '100%', maxWidth: 640, position: 'relative' }} ref={dropdownRef}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Button
-            size="sm"
-            variant={dropdownOpen ? 'active' : 'default'}
-            icon={FolderOpen}
-            onClick={() => { setDropdownOpen((o) => !o); setSearch('') }}
-          >
-            Project
-            <ChevronDown size={14} style={{ transform: dropdownOpen ? 'rotate(180deg)' : undefined, transition: 'transform .15s', color: 'var(--muted)' }} />
-          </Button>
-        </div>
-
-        {/* Dropdown panel */}
-        {dropdownOpen && (
-          <div style={{
-            position: 'absolute', top: 'calc(100% + 6px)', left: 0,
-            width: 300, zIndex: 100,
-            background: 'var(--surface)', border: '1px solid var(--line)',
-            borderRadius: 12, boxShadow: '0 12px 32px rgba(16,24,40,.14)',
-            overflow: 'hidden',
-          }}>
-            {/* Search input */}
-            <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Search size={15} style={{ color: 'var(--muted)' }} />
-              <input
-                autoFocus
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search or create a project"
-                style={{
-                  flex: 1, border: 0, background: 'transparent',
-                  outline: 'none', fontSize: 14, color: 'var(--ink)',
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Escape') setDropdownOpen(false)
-                  if (e.key === 'Enter' && search.trim() && filtered.length === 0) {
-                    // Start creating a project with the search text
-                    setDropdownOpen(false)
-                    setSearch('')
-                    setStage('creating')
-                    createProject.mutate(search.trim())
-                  }
-                }}
-              />
-            </div>
-
-            {/* Project list */}
-            <div style={{ maxHeight: 240, overflowY: 'auto' }}>
-              {!isFetched && (
-                <div style={{ padding: '14px 16px', color: 'var(--muted)', fontSize: 13 }}>Loading…</div>
-              )}
-              {isFetched && filtered.length === 0 && search.trim() && (
-                <div style={{ padding: '12px 16px', color: 'var(--muted)', fontSize: 13 }}>
-                  No match — press Enter to create "{search}"
-                </div>
-              )}
-              {isFetched && filtered.length === 0 && !search.trim() && (
-                <div style={{ padding: '12px 16px', color: 'var(--muted)', fontSize: 13 }}>
-                  No projects yet.
-                </div>
-              )}
-              {filtered.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => { setDropdownOpen(false); navigate(`/projects/${p.id}/overview`) }}
-                  style={{
-                    width: '100%', display: 'flex', alignItems: 'center', gap: 10,
-                    padding: '10px 16px', border: 0, background: 'transparent',
-                    cursor: 'pointer', textAlign: 'left',
-                  }}
-                  onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = 'var(--bg)')}
-                  onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = 'transparent')}
-                >
-                  <StatusIcon status={p.status} />
-                  <span style={{
-                    flex: 1, fontSize: 14, color: 'var(--ink)', fontWeight: 400,
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  }}>
-                    {p.name}
-                  </span>
-                </button>
-              ))}
-            </div>
-
-            {/* New project footer */}
-            <div style={{ borderTop: '1px solid var(--line)' }}>
-              <button
-                onClick={() => {
-                  setDropdownOpen(false)
-                  setTimeout(() => inputRef.current?.focus(), 60)
-                }}
-                style={{
-                  width: '100%', display: 'flex', alignItems: 'center', gap: 10,
-                  padding: '11px 16px', border: 0, background: 'transparent',
-                  cursor: 'pointer', textAlign: 'left', color: 'var(--ink)',
-                }}
-                onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = 'var(--bg)')}
-                onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = 'transparent')}
-              >
-                <Plus size={16} style={{ color: 'var(--muted)' }} />
-                <span style={{ fontSize: 14, fontWeight: 500 }}>New project</span>
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
+    </div>
     </div>
   )
 }
 
-function ProposalCard({ proposal, spaced, busy, onAnswer }: {
+function ProposalCard({ proposal, spaced, busy, onAnswer, onEdit }: {
   proposal: Proposal
   spaced: boolean
   busy: boolean
   onAnswer: (answer: 'yes' | 'no') => void
+  onEdit: (patch: Partial<ProposalFields>) => void
 }) {
-  const { name, description, goal, answer } = proposal
-  return (
-    <div style={{ marginTop: spaced ? 10 : 0, whiteSpace: 'normal' }}>
-      <div style={{ color: 'var(--ink)', fontWeight: 500, marginBottom: 6 }}>Create this project?</div>
-      <div style={{ border: '1px solid var(--line)', borderRadius: 10, background: 'var(--bg)', padding: '10px 12px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, color: 'var(--ink)' }}>
-          <Folder size={15} strokeWidth={1.8} style={{ color: 'var(--accent)', flexShrink: 0 }} />
-          {name}
-        </div>
-        {goal && (
-          <div style={{ marginTop: 6, fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5, display: 'flex', gap: 6 }}>
-            <Target size={14} strokeWidth={1.9} style={{ color: 'var(--accent)', flexShrink: 0, marginTop: 3 }} />
-            <span><strong style={{ fontWeight: 600 }}>Goal:</strong> {goal}</span>
+  const { name, description, goal, country, ministry, department, answer } = proposal
+  const owner = [country, ministry, department].filter(Boolean).join(' · ')
+
+  // answered: the details as they were sent
+  if (answer) {
+    return (
+      <div style={{ marginTop: spaced ? 10 : 0, whiteSpace: 'normal' }}>
+        <div className="pc-card">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, color: 'var(--ink)' }}>
+            <Folder size={15} strokeWidth={1.8} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+            {name}
           </div>
-        )}
-        {description && (
-          <div style={{ marginTop: 4, fontSize: 13, color: 'var(--muted)', lineHeight: 1.5 }}>{description}</div>
-        )}
-      </div>
-      {!answer ? (
-        <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-          <Button size="sm" variant="primary" icon={Check} disabled={busy} onClick={() => onAnswer('yes')}>Yes, create</Button>
-          <Button size="sm" icon={X} disabled={busy} onClick={() => onAnswer('no')}>No</Button>
+          {owner && <div className="pc-meta"><Landmark size={13} /> {owner}</div>}
+          {goal && <div className="pc-text"><Target size={13} strokeWidth={1.9} /><span><strong>Goal:</strong> {goal}</span></div>}
+          {description && <div className="pc-text"><FileText size={13} strokeWidth={1.9} /><span><strong>Service summary:</strong> {description}</span></div>}
         </div>
-      ) : (
         <div style={{ marginTop: 8, fontSize: 13, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
           {answer === 'yes'
             ? <><Spinner size={12} /> Creating the project…</>
             : <><X size={13} /> Not created. Tell me what to change, or ask anything else.</>}
         </div>
-      )}
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ marginTop: spaced ? 10 : 0, whiteSpace: 'normal' }}>
+      <div style={{ color: 'var(--ink)', fontWeight: 500 }}>Create this project?</div>
+      <div style={{ color: 'var(--muted)', fontSize: 12.5, marginBottom: 8 }}>Check the details and change anything that is wrong or missing.</div>
+      <div className="pc-card pc-form">
+        <label className="pc-field">
+          <span>Project name</span>
+          <input className="pc-input" value={name} onChange={(e) => onEdit({ name: e.target.value })} disabled={busy} style={{ fontWeight: 600 }} />
+        </label>
+        <label className="pc-field">
+          <span>Goal</span>
+          <textarea className="pc-input" dir="auto" rows={3} value={goal} onChange={(e) => onEdit({ goal: e.target.value })} disabled={busy}
+            placeholder="What should the simplification achieve — for citizens, and in the process?" />
+        </label>
+        <label className="pc-field">
+          <span>Service summary</span>
+          <textarea className="pc-input" dir="auto" rows={4} value={description} onChange={(e) => onEdit({ description: e.target.value })} disabled={busy}
+            placeholder="What the service is, who applies, how it works today and the known problems" />
+        </label>
+        <div className="pc-grid">
+          <label className="pc-field">
+            <span>Country</span>
+            <input className="pc-input" value={country} onChange={(e) => onEdit({ country: e.target.value })} disabled={busy} placeholder="Bangladesh" />
+          </label>
+          <label className="pc-field">
+            <span>Ministry</span>
+            <input className="pc-input" value={ministry} onChange={(e) => onEdit({ ministry: e.target.value })} disabled={busy} placeholder="e.g. Ministry of Home Affairs" />
+          </label>
+          <label className="pc-field">
+            <span>Department of the ministry</span>
+            <input className="pc-input" value={department} onChange={(e) => onEdit({ department: e.target.value })} disabled={busy} placeholder="e.g. Department of Immigration and Passports" />
+          </label>
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+        <Button size="sm" variant="primary" icon={Check} disabled={busy || !name.trim()} onClick={() => onAnswer('yes')}>Yes, create</Button>
+        <Button size="sm" icon={X} disabled={busy} onClick={() => onAnswer('no')}>No</Button>
+      </div>
     </div>
   )
 }

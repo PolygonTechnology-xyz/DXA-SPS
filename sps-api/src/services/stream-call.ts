@@ -12,6 +12,8 @@ interface RunOptions {
   maxTokens: number;
   tools?: unknown[];             // server tools (web_search / web_fetch)
   betas?: string[];
+  /** extra request fields, e.g. thinking / output_config for the newer models */
+  params?: Record<string, unknown>;
   emit: Emit;
   onText?: (delta: string) => void;
 }
@@ -37,7 +39,8 @@ export async function runStreamed(opts: RunOptions): Promise<{ content: Anthropi
         system: opts.system,
         messages,
         ...(opts.tools?.length ? { tools: opts.tools as Anthropic.ToolUnion[] } : {}),
-      },
+        ...(opts.params ?? {}),
+      } as Anthropic.MessageCreateParamsStreaming,
       opts.betas?.length ? { headers: { "anthropic-beta": opts.betas.join(",") } } : undefined,
     );
 

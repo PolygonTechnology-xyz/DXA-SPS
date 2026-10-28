@@ -74,12 +74,23 @@ function processSheets(kind: "asis" | "tobe", v: Version, origin: string): Sheet
           { title: "Step", width: 6 }, { title: "Step name", width: 24 }, { title: "Actor", width: 24 }, { title: "Action", width: 50 },
           { title: "Channel", width: 12 }, { title: "Time (days)", width: 10 }, { title: "Merged from AS-IS steps", width: 16 },
           { title: "Simplification rationale", width: 40 }, { title: "Legal basis", width: 30 },
+          { title: "How it is digitalized", width: 45 }, { title: "If rejected / returned", width: 45 },
+          { title: "World best practice", width: 45 }, { title: "Prerequisites", width: 40 }, { title: "Allowed under (current law)", width: 30 }, { title: "Owner", width: 22 },
+          { title: "Effort", width: 12 }, { title: "Fallback", width: 30 }, { title: "Open checks", width: 40 },
           { title: "Type", width: 11 }, { title: "Visit", width: 7 }, { title: "Fee (৳)", width: 9 },
         ],
         rows: steps.map((s) => [
           s.step_number, text(s.step_name), text(s.actor), text(s.action), text(s.channel), s.time_days ?? "",
           Array.isArray(s.merged_from) ? (s.merged_from as unknown[]).join(", ") : text(s.merged_from),
           text(s.simplification_rationale), text(s.legal_basis),
+          text(s.digital_how), text(s.if_rejected),
+          ...(() => {
+            const im = (s.implementation ?? {}) as Record<string, unknown>;
+            const effort: Record<string, string> = { quick: "Quick win (< 3 months)", medium: "3-12 months", long: "Over a year" };
+            const checks = (Array.isArray(s.checks) ? s.checks : []) as Array<{ severity?: string; issue?: string }>;
+            return [text(s.best_practice), text(im.prerequisites), text(im.legal_fit ?? im.law_change), text(im.owner), effort[text(im.effort)] ?? text(im.effort), text(im.fallback),
+              checks.map((c) => `${c.severity === "high" ? "⚠ " : ""}${text(c.issue)}`).join("\n")];
+          })(),
           text(s.step_type) || "activity", s.visit ? "Yes" : "", s.fee ?? "",
         ]),
       };

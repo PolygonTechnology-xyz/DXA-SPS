@@ -3,13 +3,13 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { projectsApi, type Project } from '@/api/projects'
-import { runAsis } from '@/lib/asis'
 import { useProjectFiles } from '@/lib/files'
 import { stagesOf, pendingFindings, type Stage } from '@/lib/progress'
 import type { LucideIcon } from 'lucide-react'
-import { Paperclip, Link, Search, ArrowRight, Pencil, Sparkles, Workflow, PackageOpen, MessageSquare } from 'lucide-react'
+import { Paperclip, Link, Search, ArrowRight, Pencil, Sparkles, Workflow, PackageOpen, MessageSquare, BookOpen } from 'lucide-react'
 import { Button, Spinner } from '@/components/ui'
 import { useNavigation } from '@/stores/navigation'
+import { useWebSources } from '@/components/project/WebSources'
 
 /** Text that turns into an input (or a text area) on click; Enter / leaving saves, Esc cancels */
 function Editable({ value, onSave, placeholder, multiline, big, ariaLabel }: {
@@ -124,12 +124,18 @@ export default function OverviewPane({ projectId }: Props) {
               </div>
             )}
         </Field>
-        <Field label="Description">
-          <Editable multiline ariaLabel="Description" value={project.description || ''} onSave={(v) => save({ description: v })} />
+        <Field label="Service summary">
+          <Editable multiline ariaLabel="Service summary" value={project.description || ''} placeholder="What the service is, who applies, how it works today and the known problems" onSave={(v) => save({ description: v })} />
         </Field>
         {/* the AS-IS review searches this country's laws and government services */}
         <Field label="Country">
           <Editable ariaLabel="Country" value={project.country || 'Bangladesh'} onSave={(v) => save({ country: v || 'Bangladesh' })} />
+        </Field>
+        <Field label="Ministry">
+          <Editable ariaLabel="Ministry" value={project.ministry || ''} placeholder="Ministry responsible for the service" onSave={(v) => save({ ministry: v })} />
+        </Field>
+        <Field label="Department of the ministry">
+          <Editable ariaLabel="Department of the ministry" value={project.department || ''} placeholder="Department / directorate that delivers the service" onSave={(v) => save({ department: v })} />
         </Field>
         <div style={{ fontSize: 12, color: 'var(--muted)', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 5, marginTop: 4 }}>
           <Pencil size={12} /> {savedMsg}
@@ -153,17 +159,8 @@ function NextStep({ project, stages, onNavigate }: {
   onNavigate: (pane: string, state?: Record<string, unknown>) => void
 }) {
   const { files, busy: filesBusy, busyLabel, loaded } = useProjectFiles(project.id)
-  const [urlOpen, setUrlOpen] = useState(false)
-  const [url, setUrl] = useState('')
-  const [confirmWeb, setConfirmWeb] = useState(false)
+  const { accepted } = useWebSources(project.id)
   const openChat = () => useNavigation.getState().requestChatOpen()
-
-  // the AS-IS run continues in the background; its progress shows on the AS-IS tab
-  function startWeb(opts: { url?: string } = {}) {
-    if (filesBusy || project.running) return
-    runAsis({ projectId: project.id, name: project.name, description: project.description, ...opts })
-    onNavigate('asis')
-  }
 
   const pending = pendingFindings(project)
   const next = stages.find((s) => s.state !== 'done')
@@ -219,49 +216,31 @@ function NextStep({ project, stages, onNavigate }: {
       </NextBox>
     )
   }
-  if (files.length > 0) {
+  // sources chosen (documents and / or accepted web sites): the user starts the AS-IS
+  if (files.length > 0 || accepted.length > 0) {
+    const parts = [
+      files.length ? `${files.length} document${files.length === 1 ? '' : 's'}` : '',
+      accepted.length ? `${accepted.length} accepted web source${accepted.length === 1 ? '' : 's'}` : '',
+    ].filter(Boolean).join(' and ')
     return (
-      <NextBox title="Let's Map How Your Service Works Today" sub={`Your ${files.length === 1 ? 'document is' : `${files.length} documents are`} ready. I'll read ${files.length === 1 ? 'it' : 'them'} and turn ${files.length === 1 ? 'it' : 'them'} into a clear, step-by-step picture of your current process (AS-IS) — with a reference for every step.`}>
+      <NextBox title="Let's Map How Your Service Works Today" sub={`Your ${parts} ${files.length + accepted.length === 1 ? 'is' : 'are'} ready. I'll turn them into a clear, step-by-step picture of your current process (AS-IS) — with a reference for every step.`}>
         <Button variant="primary" icon={Workflow} onClick={() => onNavigate('asis', { autostart: true })}>Start the AS-IS</Button>
-        <Button icon={Paperclip} onClick={() => onNavigate('files')}>Add more documents</Button>
+        <Button icon={BookOpen} onClick={() => onNavigate('files')}>Add more in Knowledge</Button>
       </NextBox>
     )
   }
 
+  // No sources yet: every choice leads to the Knowledge page — nothing is mapped until the user starts it
   return (
-    <NextBox title="Let's Map How Your Service Works Today" sub="Share what you have and I'll turn it into a clear, step-by-step picture of your current process (AS-IS). Where should I start?">
+    <NextBox title="Let's Map How Your Service Works Today" sub="Choose what I should use. Everything is collected on the Knowledge page — I only map the AS-IS when you say so.">
       <div className="ov-sources">
         <SourceButton icon={Paperclip} title="Upload your documents" sub="SOPs, forms, circulars, even scanned pages" onClick={() => onNavigate('files')} />
-        <SourceButton icon={Search} title="Let me search the web" sub="I'll use official government sources" onClick={() => setConfirmWeb(true)} />
-        <SourceButton icon={Link} title="Share a web page" sub="One page that explains the process" active={urlOpen} onClick={() => setUrlOpen((o) => !o)} />
+        <SourceButton icon={Search} title="Let me search the web" sub="I'll list official sites — you accept or reject each" onClick={() => onNavigate('files', { webSearch: true })} />
+        <SourceButton icon={Link} title="Share a web page" sub="Add a link, with a short note of what to take from it" onClick={() => onNavigate('files', { addLink: true })} />
       </div>
-      {urlOpen && (
-        <div style={{ display: 'flex', gap: 8, marginTop: 12, width: '100%' }}>
-          <input className="ui-input" value={url} onChange={(e) => setUrl(e.target.value)} autoFocus placeholder="https://…" aria-label="Page address"
-            onKeyDown={(e) => { if (e.key === 'Enter' && url.trim()) startWeb({ url: url.trim() }) }} />
-          <Button variant="primary" disabled={!url.trim()} onClick={() => startWeb({ url: url.trim() })}>Fetch &amp; analyse</Button>
-        </div>
-      )}
       <p style={{ margin: '12px 0 0', fontSize: 12.5, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
-        <MessageSquare size={13} /> Or just tell me in the chat on the right — for example “start the AS-IS”.
+        <MessageSquare size={13} /> Or just tell me in the chat on the right.
       </p>
-
-      {confirmWeb && (
-        <div onClick={() => setConfirmWeb(false)} onKeyDown={(e) => { if (e.key === 'Escape') setConfirmWeb(false) }}
-          style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(17,24,39,.4)', display: 'grid', placeItems: 'center', padding: 16 }}>
-          <div role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()} className="ui-card"
-            style={{ padding: 22, maxWidth: 420, width: '100%', boxShadow: '0 12px 40px rgba(16,24,40,.18)' }}>
-            <h3 style={{ margin: '0 0 6px', fontSize: 16, fontWeight: 600 }}>Do you want to start the simplification?</h3>
-            <p style={{ margin: 0, fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.55 }}>
-              I'll search official sources online for “{project.name}” and map how it works today — with a reference for every step.
-            </p>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
-              <Button onClick={() => setConfirmWeb(false)}>No</Button>
-              <Button variant="primary" icon={Search} autoFocus onClick={() => { setConfirmWeb(false); startWeb() }}>Yes, start</Button>
-            </div>
-          </div>
-        </div>
-      )}
     </NextBox>
   )
 }

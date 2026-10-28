@@ -1,4 +1,4 @@
-import { api } from './client'
+import { api, sseStream, type SseEvent } from './client'
 
 export interface Project {
   id: string
@@ -17,6 +17,9 @@ export interface Project {
   interview_data: Record<string, InterviewStepData>
   /** Country whose laws and services the agents research (default Bangladesh) */
   country?: string
+  /** who owns the service — asked when the project is created */
+  ministry?: string
+  department?: string
   /** Web/AI proposals awaiting the user's consent (and their decisions) */
   asis_findings?: Finding[]
   /** Last AS-IS review: when it ran, questions it could not answer */
@@ -178,6 +181,16 @@ export interface ToBeStep {
   merged_from_uids?: string[]
   simplification_rationale: string
   legal_basis?: string
+  /** a digital / hybrid step: how it is digitalized (system, automation, notifications) */
+  digital_how?: string
+  /** a decision: what happens on a "No" — who tells the applicant, what to fix, where it returns, appeal */
+  if_rejected?: string
+  /** the world best practice this step follows, cited to the web page it came from */
+  best_practice?: string
+  /** how the step is put in place (the TO-BE's implementation pass) */
+  implementation?: { prerequisites: string; legal_fit: string; owner: string; effort: 'quick' | 'medium' | 'long'; fallback: string }
+  /** what the reviewer still finds unrealistic about this step */
+  checks?: Array<{ severity: 'high' | 'medium'; issue: string }>
   sources?: StepSource[]
   step_type?: 'activity' | 'decision' | 'document' | 'message'
   visit?: boolean
@@ -192,9 +205,9 @@ export interface StoredChatMessage {
   mode: 'chat' | 'interview'
   pane: string | null
   /** text, or a card drawn from payload (consent: { finding_ids, lang }) */
-  kind: 'text' | 'consent'
+  kind: 'text' | 'consent' | 'review_steps'
   /** consent: { finding_ids, lang }; review questions: { sources } for their "Sources: [1] [2]" lines */
-  payload: { finding_ids?: string[]; lang?: 'bn' | 'en'; mode?: 'confirm'; sources?: StepSource[]; choices?: string[] } | null
+  payload: { finding_ids?: string[]; lang?: 'bn' | 'en'; mode?: 'confirm'; sources?: StepSource[]; choices?: string[]; topics?: import('@/components/project/ReviewSteps').ReviewTopic[] } | null
   created_at: number
 }
 
@@ -241,14 +254,25 @@ export interface ProjectFile {
   status_note?: string | null
 }
 
+/** A web page found for the project (Knowledge page) — the AS-IS uses it only once accepted */
+export interface WebSource {
+  id: string
+  url: string
+  title: string
+  /** two lines: what the AS-IS takes from this site */
+  summary: string
+  status: 'pending' | 'accepted' | 'rejected'
+  created_at: number
+}
+
 export const projectsApi = {
   list: () => api.get<Project[]>('/api/projects'),
   get: (id: string) => api.get<Project>(`/api/projects/${id}`),
-  create: (body: { name: string; description?: string; goal?: string }) =>
+  create: (body: { name: string; description?: string; goal?: string; country?: string; ministry?: string; department?: string }) =>
     api.post<Project>('/api/projects', body),
   /** one short AI call: a goal for a project that has none */
   suggestGoal: (id: string) => api.post<Project>(`/api/projects/${id}/suggest-goal`),
-  update: (id: string, patch: Partial<Pick<Project, 'name' | 'description' | 'goal' | 'status' | 'asis_steps' | 'tobe_steps' | 'interview_data' | 'memory' | 'country' | 'sps'>>) =>
+  update: (id: string, patch: Partial<Pick<Project, 'name' | 'description' | 'goal' | 'status' | 'asis_steps' | 'tobe_steps' | 'interview_data' | 'memory' | 'country' | 'ministry' | 'department' | 'sps'>>) =>
     api.patch<Project>(`/api/projects/${id}`, patch),
   trash: (id: string) => api.delete<{ ok: boolean }>(`/api/projects/${id}`),
   /** Chat rail history of this project (saved by the server as messages are sent) */
@@ -274,6 +298,13 @@ export const projectsApi = {
   decideFindings: (id: string, decisions: Array<{ id: string; decision: 'accept' | 'reject' | 'skip'; value?: string }>) =>
     api.post<{ asis_steps: AsIsStep[]; asis_findings: Finding[]; results: string[] }>(`/api/projects/${id}/findings/decide`, { decisions }),
   listFiles: (id: string) => api.get<ProjectFile[]>(`/api/projects/${id}/files`),
+  webSources: (id: string) => api.get<{ sources: WebSource[]; default_query: string }>(`/api/projects/${id}/web-sources`),
+  searchWebSources: (id: string, query: string, onEvent: (e: SseEvent) => void) =>
+    sseStream(`/api/projects/${id}/web-sources/search`, { query }, onEvent),
+  /** a page the user gives — kept as accepted, with their note (or the AI's two lines) */
+  addWebLink: (id: string, url: string, note: string) => api.post<WebSource>(`/api/projects/${id}/web-sources`, { url, note }),
+  decideWebSource: (id: string, sourceId: string, status: WebSource['status']) =>
+    api.patch<WebSource>(`/api/projects/${id}/web-sources/${sourceId}`, { status }),
   uploadFile: (id: string, file: File) => {
     const form = new FormData()
     form.append('file', file)

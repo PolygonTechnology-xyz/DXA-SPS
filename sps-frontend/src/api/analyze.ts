@@ -1,10 +1,15 @@
-import { sseStream, type SseEvent } from './client'
+import { api, sseStream, type SseEvent } from './client'
+
+export interface ChatModel { id: string; label: string; note: string }
 
 export const analyzeApi = {
   homeChat: (
     messages: Array<{ role: 'user' | 'assistant'; content: string }>,
     onEvent: (e: SseEvent) => void,
-  ) => sseStream('/api/home/chat', { messages }, onEvent),
+    model?: string,
+  ) => sseStream('/api/home/chat', { messages, model }, onEvent),
+
+  homeModels: () => api.get<{ models: ChatModel[]; default: string }>('/api/home/models'),
 
   projectChat: (
     projectId: string,

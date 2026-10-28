@@ -276,7 +276,7 @@ function ProcessView({ v }: { v: ProcessVersion }) {
           readOnly
           boldColumns={[2]}
           sources={collectSources(asis)}
-          columns={['Step', 'Actor', 'Action', 'Input', 'Time', 'Pain Point', 'Digital', 'Law / regulation']}
+          columns={['Step', 'Actor', 'Action', 'Input', 'Time', 'Pain Point', 'Digital', 'Law (Government Order / Regulation / Judgement)']}
           rows={asis.map((s) => [
             String(s.step_number), s.actor, s.action, s.input || '—', time(s), s.pain_points || '—',
             s.digital_status ? `${DIGITAL_LABEL[s.digital_status] ?? s.digital_status}${s.digital_note ? ` — ${s.digital_note}` : ''}` : '—',
@@ -289,8 +289,8 @@ function ProcessView({ v }: { v: ProcessVersion }) {
           readOnly
           boldColumns={[2]}
           sources={collectSources(tobe)}
-          columns={['Step', 'Actor', 'Action', 'Channel', 'Time', 'Rationale', 'Legal basis']}
-          rows={tobe.map((s) => [String(s.step_number), s.actor, s.action, s.channel, time(s), s.simplification_rationale || '—', s.legal_basis || '—'])}
+          columns={['Step', 'Actor', 'Action', 'Channel', 'How it is digitalized', 'If rejected / returned', 'Time', 'Rationale', 'Legal basis', 'World best practice']}
+          rows={tobe.map((s) => [String(s.step_number), s.actor, s.action, s.channel, s.digital_how || '—', s.if_rejected || '—', time(s), s.simplification_rationale || '—', s.legal_basis || '—', s.best_practice || '—'])}
         />
       )}
       {view === 'bpmn' && (

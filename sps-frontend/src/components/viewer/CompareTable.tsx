@@ -1,4 +1,5 @@
 import type { AsIsStep, ToBeStep } from '@/api/projects'
+import { CitedText } from '@/components/viewer/ImplementationPlan'
 
 type Change = 'kept' | 'improved' | 'merged' | 'new' | 'removed'
 
@@ -22,6 +23,15 @@ const shortName = (s: { action?: string; step_name?: string }) => {
   const i = text.indexOf(':')
   return (i > 0 && i <= 40 ? text.slice(0, i) : text) || s.step_name || '—'
 }
+
+/** "Label: long description [1]" → "long description" (what the step does) */
+const detail = (s: { action?: string }) => {
+  const text = String(s.action ?? '').replace(/\s*\[\d+\]/g, '').trim()
+  const i = text.indexOf(':')
+  return i > 0 && i <= 40 ? text.slice(i + 1).trim() : ''
+}
+const EFFORT = { quick: 'Quick win', medium: '3–12 months', long: 'Over a year' } as const
+const CHANNEL: Record<ToBeStep['channel'], string> = { digital: 'Digital', in_person: 'In person', hybrid: 'Hybrid' }
 
 // "Improved" = one AS-IS step made faster, with fewer visits or cheaper
 const days = (list: Array<{ time_days?: number }>) => list.reduce((n, s) => n + (Number(s.time_days) || 0), 0)
@@ -101,11 +111,11 @@ export default function CompareTable({ asis, tobe }: { asis: AsIsStep[]; tobe: T
       </div>
 
       <div style={{ border: '1px solid var(--line)', borderRadius: 'var(--radius)', overflow: 'auto', background: 'var(--surface)' }}>
-        <table className="ui-table" style={{ width: '100%', minWidth: 560, borderCollapse: 'separate', borderSpacing: 0, fontSize: 12.5 }}>
+        <table className="ui-table" style={{ width: '100%', minWidth: 720, borderCollapse: 'separate', borderSpacing: 0, fontSize: 12.5 }}>
           <thead>
             <tr>
-              <th style={{ ...th, width: '42%' }}>AS-IS (what it replaces)</th>
-              <th style={{ ...th, width: '42%' }}>TO-BE</th>
+              <th style={{ ...th, width: '30%' }}>AS-IS (what it replaces)</th>
+              <th style={{ ...th, width: '58%' }}>TO-BE</th>
               <th style={th}>Change</th>
             </tr>
           </thead>
@@ -120,7 +130,37 @@ export default function CompareTable({ asis, tobe }: { asis: AsIsStep[]; tobe: T
                       : <span style={{ color: 'var(--muted)' }}>—</span>}
                   </td>
                   <td style={td}>
-                    {r.tobe ? stepLine(r.tobe.step_number, shortName(r.tobe)) : <span style={{ color: 'var(--muted)' }}>—</span>}
+                    {r.tobe ? (
+                      <div className="cmp-tobe">
+                        <div className="cmp-tobe__name">{stepLine(r.tobe.step_number, shortName(r.tobe))}</div>
+                        {detail(r.tobe) && <div className="cmp-tobe__action">{detail(r.tobe)}</div>}
+                        <div className="cmp-tobe__meta">
+                          {r.tobe.actor && <span>{r.tobe.actor}</span>}
+                          {r.tobe.channel && <span className={`cmp-ch cmp-ch--${r.tobe.channel}`}>{CHANNEL[r.tobe.channel] ?? r.tobe.channel}</span>}
+                          {r.tobe.time_days != null && <span>{r.tobe.time_days === 0 ? 'Same day' : `${r.tobe.time_days} day${r.tobe.time_days === 1 ? '' : 's'}`}</span>}
+                          {r.tobe.visit && <span>Office visit</span>}
+                          {!!r.tobe.fee && <span>Fee {r.tobe.fee}</span>}
+                          {r.tobe.implementation && <span className={`ip-chip--${r.tobe.implementation.effort}`}>{EFFORT[r.tobe.implementation.effort]}</span>}
+                        </div>
+                        {r.tobe.digital_how && (
+                          <div className="cmp-tobe__note cmp-tobe__note--digital"><strong>How it is digitalized:</strong> {r.tobe.digital_how.replace(/\s*\[\d+\]/g, '')}</div>
+                        )}
+                        {r.tobe.best_practice && (
+                          <div className="cmp-tobe__note cmp-tobe__note--bp"><strong>World best practice:</strong> <CitedText text={r.tobe.best_practice} step={r.tobe} /></div>
+                        )}
+                        {r.tobe.if_rejected && (
+                          <div className="cmp-tobe__note cmp-tobe__note--reject">
+                            <strong>If rejected{r.tobe.no_goto ? ` → back to step ${r.tobe.no_goto}` : ''}:</strong> {r.tobe.if_rejected.replace(/\s*\[\d+\]/g, '')}
+                          </div>
+                        )}
+                        {r.tobe.checks?.map((c, ci) => (
+                          <div key={ci} className={`ip-check ip-check--${c.severity}`} style={{ marginLeft: 27 }}>⚠ {c.issue}</div>
+                        ))}
+                        {r.tobe.simplification_rationale && (
+                          <div className="cmp-tobe__why"><strong>Why:</strong> {r.tobe.simplification_rationale.replace(/\s*\[\d+\]/g, '')}</div>
+                        )}
+                      </div>
+                    ) : <span style={{ color: 'var(--muted)' }}>—</span>}
                   </td>
                   <td style={td}>
                     <span title={CHANGE[r.change].title} style={{ fontSize: 11.5, fontWeight: 600, padding: '1px 7px', borderRadius: 4, color: CHANGE[r.change].color, background: CHANGE[r.change].bg, whiteSpace: 'nowrap' }}>

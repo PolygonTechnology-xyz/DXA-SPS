@@ -166,12 +166,12 @@ export function Notice({ tone = 'danger', children, action }: { tone?: 'danger' 
   const c = tone === 'danger'
     ? { bg: 'var(--danger-soft)', line: 'var(--danger-line)', ink: 'var(--danger)' }
     : tone === 'warn'
-    ? { bg: 'var(--warn-soft)', line: '#fde68a', ink: 'var(--warn)' }
-    : { bg: 'var(--accent-soft)', line: '#c7d2fe', ink: 'var(--accent)' }
+    ? { bg: 'var(--warn-soft)', line: '#fcd34d', ink: '#78350f' }
+    : { bg: 'var(--accent-soft)', line: '#c7d2fe', ink: '#312e81' }
   return (
     <div style={{
       background: c.bg, border: `1px solid ${c.line}`, color: c.ink, borderRadius: 'var(--radius-sm)',
-      padding: '10px 14px', marginBottom: 16, fontSize: 13.5,
+      padding: '10px 14px', marginBottom: 16, fontSize: 13.5, fontWeight: 500,
       display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'space-between',
     }}>
       <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>{children}</span>

@@ -13,12 +13,14 @@ import { projectsApi, type ToBeStep } from '@/api/projects'
 import { analyzeApi } from '@/api/analyze'
 import TableViewer from '@/components/viewer/TableViewer'
 import CompareTable from '@/components/viewer/CompareTable'
+import ImplementationPlan from '@/components/viewer/ImplementationPlan'
 import ViewerToolbar from '@/components/viewer/ViewerToolbar'
 import BpmnViewer from '@/components/viewer/BpmnViewer'
 import type { AsIsStep } from '@/api/projects'
 import { downloadSvg, downloadPng } from '@/utils/download'
+import DownloadMenu from '@/components/viewer/DownloadMenu'
 import { BASE } from '@/api/client'
-import { Download, FileSpreadsheet, RotateCw, ArrowLeftRight, CircleCheck, X, TriangleAlert, Table2, Waypoints, ChevronRight, Search, Check, Undo2, ClipboardCheck } from 'lucide-react'
+import { Download, FileSpreadsheet, RotateCw, ArrowLeftRight, CircleCheck, X, TriangleAlert, Table2, Waypoints, ChevronRight, Search, Check, Undo2, ClipboardCheck, Rocket } from 'lucide-react'
 import { coverage } from '@/lib/asisReview'
 import { waitForServer } from '@/lib/asis'
 import { GitBranch, ClipboardList } from 'lucide-react'
@@ -47,7 +49,7 @@ export default function ToBePane({ projectId, pane }: Props) {
   const qc = useQueryClient()
   const tobe = useToBeStore()
   const logEndRef = useRef<HTMLDivElement>(null)
-  const [tab, setTab] = useState<'table' | 'bpmn' | 'flow' | 'compare'>('table')
+  const [tab, setTab] = useState<'table' | 'bpmn' | 'flow' | 'compare' | 'plan'>('table')
   // failed SPS checks reported by the server when approving
   const [approveError, setApproveError] = useState<string[] | null>(null)
   const [expanded, setExpanded] = useState(false)
@@ -219,13 +221,15 @@ export default function ToBePane({ projectId, pane }: Props) {
   }
 
   const fileBase = (project?.name ?? 'tobe').replace(/\s+/g, '-')
-  const tobeColumns = ['Step', 'Actor', 'Action', 'Channel', 'Time', 'Rationale', 'Legal basis']
+  const tobeColumns = ['Step', 'Actor', 'Action', 'Channel', 'How it is digitalized', 'If rejected / returned', 'Time', 'Rationale', 'Legal basis', 'World best practice']
   const toRows = (list: ToBeStep[]) => list.map((s) => {
     const type = s.step_type && s.step_type !== 'activity' ? `${STEP_TYPE_LABEL[s.step_type]?.icon ?? ''} ` : ''
     const time = [s.time_days != null && String(s.time_days) !== '' ? `${s.time_days}d` : '', s.visit ? '🚶' : '', s.fee ? `৳${s.fee}` : ''].filter(Boolean).join(' · ') || '—'
-    return [`${type}${s.step_number}`, s.actor, s.action, s.channel, time, s.simplification_rationale ?? '—', s.legal_basis || '—']
+    return [`${type}${s.step_number}`, s.actor, s.action, s.channel, s.digital_how || '—', s.if_rejected || '—', time, s.simplification_rationale ?? '—', s.legal_basis || '—', s.best_practice || '—']
   })
   const tobeRows = toRows(tobeSteps)
+  const openChecks = tobeSteps.reduce((n, s) => n + (s.checks?.length ?? 0), 0)
+  const stepsWithChecks = tobeSteps.filter((s) => s.checks?.length).length
   // an approved TO-BE is view only
   const tobeEditProps = project?.version?.tobe_locked ? { readOnly: true } : { onDeleteRow: deleteStep, onCellChange: editCell, onAddRow: addStep }
   const tobeSources = collectSources(tobeSteps)
@@ -426,20 +430,18 @@ export default function ToBePane({ projectId, pane }: Props) {
             onTabChange={setTab}
             tabs={[...viewOptions,
               // { value: 'flow' as const, label: 'Flowchart', icon: GitBranch },   // hidden for now
-              { value: 'compare' as const, label: 'Compare', icon: ArrowLeftRight }]}
+              { value: 'compare' as const, label: 'Compare', icon: ArrowLeftRight },
+              { value: 'plan' as const, label: 'Implementation', icon: Rocket }]}
             versionSlot={<>
               <VersionSwitcher projectId={projectId} disabled={busy || !!project?.running} />
               {tobeFrozen && <LockHint text={`TO-BE v${project?.version?.version} is approved — view only. To change it, press Regenerate or ask in the chat: a new version is created with the same AS-IS, and this one stays as it is.`} />}
             </>}
-            info={`${tobeSteps.length} steps · from ${asisSteps.length} AS-IS`}
             actions={<>
-              <a className="ui-btn ui-btn--sm" href={BASE + projectsApi.currentExportUrl(projectId, 'tobe')} download>
-                <FileSpreadsheet size={15} strokeWidth={1.8} /> Excel
-              </a>
-              <Button size="sm" icon={Download} onClick={() => {
-                if (tab === 'flow' && flowRef.current) downloadSvg(flowRef.current, `${fileBase}-tobe-flowchart.svg`)
-                else if (bpmnRef.current) downloadPng(bpmnRef.current, `${fileBase}-tobe-bpmn.png`)
-              }}>{tab === 'flow' ? 'Flowchart' : 'BPMN'}</Button>
+              <DownloadMenu items={[
+                { label: 'Excel (table)', icon: FileSpreadsheet, href: BASE + projectsApi.currentExportUrl(projectId, 'tobe') },
+                { label: 'BPMN diagram (PNG)', icon: Waypoints, onClick: () => { if (bpmnRef.current) downloadPng(bpmnRef.current, `${fileBase}-tobe-bpmn.png`) } },
+                ...(tab === 'flow' ? [{ label: 'Flowchart (SVG)', icon: Download, onClick: () => { if (flowRef.current) downloadSvg(flowRef.current, `${fileBase}-tobe-flowchart.svg`) } }] : []),
+              ]} />
               <Button size="sm" icon={RotateCw} onClick={regenerateTobe}>Regenerate</Button>
             </>}
             onExpandToggle={tab === 'table' || tab === 'bpmn' ? () => setExpanded(true) : undefined}
@@ -490,6 +492,14 @@ export default function ToBePane({ projectId, pane }: Props) {
 
           {project && <TcvqBar project={project} onOpen={() => setTab('compare')} />}
 
+          {/* what the reviewer still finds unrealistic */}
+          {tab !== 'plan' && openChecks > 0 && (
+            <Notice tone="warn" action={<Button size="sm" iconRight={ChevronRight} onClick={() => setTab('plan')}>See them</Button>}>
+              <TriangleAlert size={16} style={{ flexShrink: 0 }} />
+              <span>{openChecks} point{openChecks > 1 ? 's' : ''} in {stepsWithChecks} step{stepsWithChecks > 1 ? 's' : ''} may not be realistic to implement — check them in Implementation.</span>
+            </Notice>
+          )}
+
 
 
           {/* ── Table / BPMN views ── */}
@@ -512,6 +522,8 @@ export default function ToBePane({ projectId, pane }: Props) {
 
           {/* ── Compare view ── */}
           {/* ── Compare: one table, each TO-BE step next to the AS-IS steps it replaces ── */}
+          {tab === 'plan' && <div style={{ marginTop: 10 }}><ImplementationPlan steps={tobeSteps} /></div>}
+
           {tab === 'compare' && (
             <div style={{ marginTop: 4 }}>
               <CompareTable asis={asisSteps as AsIsStep[]} tobe={tobeSteps} />

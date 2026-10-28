@@ -7,6 +7,8 @@ import { handleChat } from "./src/routes/chat";
 import { handleSearch } from "./src/routes/search";
 import { handleHome } from "./src/routes/home";
 import { handleWebPage } from "./src/routes/webpage";
+import { handleVoice } from "./src/routes/voice";
+import { handleWebSources } from "./src/routes/web-sources";
 import { log } from "./src/utils/log";
 import { json } from "./src/utils/cors";
 import { SPS_ASPECTS, SPS_PROFILE, SPS_PRIORITY, SPS_FEEDBACK } from "./src/services/sps-guide";
@@ -31,8 +33,10 @@ const server = Bun.serve({
     if (url.pathname.startsWith("/api/web-search")) return handleSearch(req, url);
     if (url.pathname.startsWith("/api/home")) return handleHome(req, url);
     if (url.pathname === "/api/web-page") return handleWebPage(req, url);
+    if (url.pathname.startsWith("/api/voice")) return handleVoice(req, url);
     if (url.pathname.startsWith("/api/projects")) {
       if (url.pathname.match(/\/files/)) return handleFiles(req, url);
+      if (url.pathname.match(/\/web-sources/)) return handleWebSources(req, url);
       if (url.pathname.match(/\/((interview-)?chat|chat-messages)$/)) return handleChat(req, url);
       return handleProjects(req, url);
     }

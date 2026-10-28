@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk"
 import { client } from "../services/ai"
-import { ANTHROPIC_MODEL } from "../config"
+import { ANTHROPIC_MODEL, CHAT_MODELS } from "../config"
 import { streamSse } from "../utils/sse"
 import { json } from "../utils/cors"
 import { homeToolDefinitions, executeHomeTool } from "../tools/home.tools"
@@ -11,27 +11,38 @@ import { log, startTimer } from "../utils/log"
 export async function handleHome(req: Request, url: URL): Promise<Response> {
   const method = req.method.toUpperCase()
 
+  // The model picker under the chat box
+  if (method === "GET" && url.pathname === "/api/home/models") {
+    return json({ models: CHAT_MODELS, default: ANTHROPIC_MODEL })
+  }
+
   if (method === "POST" && url.pathname === "/api/home/chat") {
-    const body = await req.json() as { messages: Array<{ role: "user" | "assistant"; content: string }> }
+    const body = await req.json() as { messages: Array<{ role: "user" | "assistant"; content: string }>; model?: string }
     const messages: Anthropic.MessageParam[] = body.messages.map((m) => ({ role: m.role, content: m.content }))
+    // only a model from the list — anything else falls back to the default
+    const model = CHAT_MODELS.some((m) => m.id === body.model) ? body.model! : ANTHROPIC_MODEL
+    // Haiku 4.5 does not think; the newer models always think, and thinking counts
+    // toward max_tokens — so they get room, and low effort keeps chat replies quick
+    const legacy = model.startsWith("claude-haiku-4-5")
+    const modelParams = legacy ? { max_tokens: 2048 } : { max_tokens: 16000, output_config: { effort: "low" } }
 
     return streamSse(async (emit) => {
-      log.chat(`home start  history=${messages.length}`)
+      log.chat(`home start  history=${messages.length}  model=${model}`)
 
       let iteration = 0
       while (iteration < 4) {
         iteration++
         const callTimer = startTimer(`home iter=${iteration}`)
         const stream = client.messages.stream({
-          model: ANTHROPIC_MODEL,
-          max_tokens: 1024,
+          model,
+          ...modelParams,
           system: HOME_SYSTEM,
           tools: homeToolDefinitions,
           messages,
-        })
+        } as Anthropic.MessageStreamParams)
         stream.on("text", (text) => { callTimer.firstToken(); emit({ type: "text", text }) })
         const response = await stream.finalMessage()
-        callTimer.done(response.usage, `stop=${response.stop_reason}  model=${ANTHROPIC_MODEL}`)
+        callTimer.done(response.usage, `stop=${response.stop_reason}  model=${model}`)
 
         log.chat(`home iter=${iteration}  stop_reason=${response.stop_reason}  usage=in:${response.usage.input_tokens} out:${response.usage.output_tokens}`)
 
@@ -50,6 +61,11 @@ export async function handleHome(req: Request, url: URL): Promise<Response> {
           }
           // The frontend shows the Yes / No card — no follow-up turn needed
           emit({ type: "done", text })
+          return
+        }
+
+        if ((response.stop_reason as string) === "refusal") {
+          emit({ type: "error", message: "The assistant could not answer this. Please rephrase." })
           return
         }
 
@@ -82,4 +98,12 @@ Decide what the user wants:
 
 Reply style: plain text only — no markdown, no **bold**, no headings, no emoji. Short paragraphs; a simple "- " list only if really needed.
 
-When creating: name =short Title Case title (e.g. "Passport Service Simplification"); description = all details the user gave about the process, in full (empty if none); goal = what the simplification should achieve, one sentence of at most 20 words, from what the user said (e.g. "Issue death certificates online within 3 working days, with no office visit"); no numbers the user did not give. Do not invent details. Do not start any AS-IS analysis — the user will upload documents or ask for that inside the project.`
+When creating (the user can edit every field on the card before pressing Yes):
+- name = short Title Case title (e.g. "Passport Service Simplification").
+- goal = a detailed goal in 2–4 sentences: the target outcome for citizens, what should change in the process (fewer office visits, documents, steps, days or cost), and who benefits (e.g. "Let citizens apply for a death certificate fully online and receive it within 3 working days. Remove the office visit and the separate attestation step, and reduce the documents asked for. Families, especially in rural areas, save travel time and cost."). No numbers the user did not give.
+- description = the service summary: what the service is, who applies, how it is delivered today and the known problems — everything the user said in full, as a clear paragraph; only widely known general facts beyond that.
+- country = "Bangladesh" unless the user says otherwise.
+- ministry and department = the user's words, or the well-known owner of the service (e.g. passport → "Ministry of Home Affairs" / "Department of Immigration and Passports"); leave empty if you are not sure — the user fills it in on the card.
+Do not invent details. Do not start any AS-IS analysis — the user will upload documents or ask for that inside the project.
+
+A message may end with "[Attached files: …]": the user attached documents about the service. You cannot read them here — they are added to the project when it is created. Treat an attachment as a sign they want a project (use the file names and their words for the name), and do not claim to know what the files say.`

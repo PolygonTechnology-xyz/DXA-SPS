@@ -38,7 +38,7 @@ export type SseEvent =
   | { type: 'action'; name: string; payload: Record<string, unknown> }
   | { type: 'project_updated'; name?: string; description?: string; goal?: string }
   | { type: 'project_created'; project: import('./projects').Project }
-  | { type: 'project_proposed'; name: string; description?: string; goal?: string }
+  | { type: 'project_proposed'; name: string; description?: string; goal?: string; country?: string; ministry?: string; department?: string }
   /** the chat tried to change an approved AS-IS / TO-BE: ask the user about a new version */
   | { type: 'version_locked'; what: 'asis' | 'tobe'; version: number }
   /** quick replies the assistant offers: shown as buttons under its message */

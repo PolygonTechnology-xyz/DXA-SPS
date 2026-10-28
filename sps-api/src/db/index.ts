@@ -52,9 +52,30 @@ for (const col of [
   // what the simplification should achieve; written by the assistant, then the user's to change
   "goal TEXT DEFAULT ''",
   "goal_by TEXT",                      // assistant | user
+  // who owns the service (asked when the project is created; `description` is shown as the service summary)
+  "ministry TEXT DEFAULT ''",
+  "department TEXT DEFAULT ''",
 ]) {
   try { db.exec(`ALTER TABLE projects ADD COLUMN ${col}`); } catch { /* already exists */ }
 }
+
+// Web sources found for a project (Knowledge page): the user accepts or rejects each one
+// before the AS-IS may use it (see services/web-sources.ts)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS web_sources (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    url TEXT NOT NULL,
+    title TEXT DEFAULT '',
+    summary TEXT DEFAULT '',         -- two lines: what the AS-IS takes from this site
+    extract TEXT DEFAULT '',         -- the facts themselves, given to the AS-IS when accepted
+    query TEXT DEFAULT '',
+    status TEXT DEFAULT 'pending',   -- pending | accepted | rejected
+    created_at INTEGER DEFAULT (unixepoch()),
+    decided_at INTEGER,
+    UNIQUE (project_id, url)
+  );
+`);
 
 // Document ingestion: each file is split into pages (see services/ingest.ts)
 for (const col of [

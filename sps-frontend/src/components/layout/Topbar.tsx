@@ -26,7 +26,7 @@ export default function Topbar() {
       overview: 'Project Overview',
       asis: 'AS-IS Process',
       tobe: 'TO-BE Process',
-      files: 'Files & Records',
+      files: 'Knowledge',
       outputs: 'Outputs',
       knowledge: 'Global Knowledge',
     }

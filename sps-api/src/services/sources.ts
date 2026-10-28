@@ -33,6 +33,9 @@ export function attachQuotes(known: Map<string, KnownSource>, quotes: unknown): 
 }
 
 /** The prompt rule asking for quotes */
+/** The app works in English only: Bangla documents and pages are translated, quotes stay exact */
+export const ENGLISH_ONLY = `LANGUAGE: write every field in English, also when the documents or web pages are in Bangla — translate what they say. Only the "quotes" stay word for word in the original language.`;
+
 export const QUOTE_RULE = `"quotes": for each source you cite, 1-2 short passages (max 25 words each) copied WORD FOR WORD from that page, in its original language and spelling — the exact text that supports your statement. They are highlighted for the user, so never paraphrase or translate. Format: [["D1:4","exact text"],["W1","exact text"]].`;
 
 const normUrl = (u: string) =>

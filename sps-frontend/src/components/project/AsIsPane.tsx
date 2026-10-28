@@ -10,15 +10,17 @@ import TableViewer from '@/components/viewer/TableViewer'
 import ViewerToolbar from '@/components/viewer/ViewerToolbar'
 import BpmnViewer from '@/components/viewer/BpmnViewer'
 import { downloadSvg, downloadPng } from '@/utils/download'
+import DownloadMenu from '@/components/viewer/DownloadMenu'
+import { useWebSources } from '@/components/project/WebSources'
 import { BASE } from '@/api/client'
 import { runAsis, runReview } from '@/lib/asis'
 import { coverage, reviewCellMeta, DIGITAL_LABEL } from '@/lib/asisReview'
 // import AsIsReadiness from '@/components/project/AsIsReadiness'   // review panel hidden for now (see below)
-import { GitBranch, ClipboardList } from 'lucide-react'
+import { GitBranch, ClipboardList, MessageSquare } from 'lucide-react'
 import SpsFlowchart from '@/components/viewer/SpsFlowchart'
 import { ProfileSheet, DocumentsSheet } from '@/components/project/SpsPanels'
 import { STEP_TYPE_LABEL } from '@/lib/sps'
-import { Download, FileSpreadsheet, RotateCw, RotateCcw, ArrowRight, Paperclip, Link, Search, Workflow, X, TriangleAlert, Table2, Waypoints, ChevronRight, CircleCheck, Trash2, Undo2, ScanSearch } from 'lucide-react'
+import { Download, FileSpreadsheet, RotateCw, RotateCcw, ArrowRight, Paperclip, Link, Search, Workflow, X, TriangleAlert, Table2, Waypoints, ChevronRight, CircleCheck, Trash2, Undo2 } from 'lucide-react'
 import { Button, IconButton, Segmented, Notice, Spinner, collectSources } from '@/components/ui'
 import { useProjectFiles } from '@/lib/files'
 import { editAsisCell, newAsisStep } from '@/lib/tableEdit'
@@ -93,6 +95,9 @@ export default function AsIsPane({ projectId }: Props) {
 
   const steps: AsIsStep[] = project?.asis_steps ?? []
   const hasFiles = uploadedFiles.length > 0
+  // web sites the user accepted on the Knowledge page count as a source too
+  const acceptedWeb = useWebSources(projectId).accepted.length
+  const hasSources = hasFiles || acceptedWeb > 0
   // Until the project and its file list have arrived, "no steps" / "no files" mean "not loaded
   // yet" — showing the empty screens then makes them flash on every reload
   const loaded = !!project && filesLoaded
@@ -103,10 +108,7 @@ export default function AsIsPane({ projectId }: Props) {
   // the open version's AS-IS is approved: view only — a change makes a new version first
   const asisFrozen = !!project?.version?.asis_locked
   const [askNewVersion, setAskNewVersion] = useState(false)
-  // "Web search" asks first: it starts an AI run straight away
-  const [confirmWeb, setConfirmWeb] = useState(false)
   // the table shows the review columns (pain point, digital, law) only on request
-  const [showAnalysis, setShowAnalysis] = useState(false)
   const regenerateAsis = () => (asisFrozen ? setAskNewVersion(true) : startAnalysis())
 
   // Auto-start only when the user asked for it ("Go to AS-IS" on Files) — opening a project
@@ -120,7 +122,7 @@ export default function AsIsPane({ projectId }: Props) {
       askedToStart &&
       !!project &&
       filesLoaded &&
-      hasFiles &&
+      hasSources &&
       !filesBusy &&
       (steps.length === 0 || (askedToRegenerate && !project?.version?.asis_locked)) &&
       !isRunning &&
@@ -131,7 +133,7 @@ export default function AsIsPane({ projectId }: Props) {
       startAnalysis()
       navigate(location.pathname, { replace: true, state: null })   // a reload does not start it again
     }
-  }, [askedToStart, askedToRegenerate, !!project, project?.version?.asis_locked, filesLoaded, hasFiles, filesBusy, steps.length, project?.running])
+  }, [askedToStart, askedToRegenerate, !!project, project?.version?.asis_locked, filesLoaded, hasSources, filesBusy, steps.length, project?.running])
 
   // Execute action dispatched from ChatRail. Read the live store value so a
   // StrictMode double-run (which sees the same captured value) doesn't start it twice.
@@ -155,23 +157,21 @@ export default function AsIsPane({ projectId }: Props) {
     setParseError(null)
     setShowNoSourceWarning(false)
     setInputMethod('none')
-    runAsis({ projectId, name: project.name, description: project.description, ...opts })
+    runAsis({ projectId, name: project.name, description: project.description, ministry: project.ministry, department: project.department, ...opts })
       .then((r) => { if (!r.ok) setParseError(r.error ?? 'Analysis failed. Please try again.') })
   }
 
   function handleGenerate() {
-    // Nothing chosen and no documents — let the user pick a source (web search starts right away)
-    if (!hasFiles && inputMethod === 'none') {
+    // no documents and no accepted web sites: the sources are chosen on the Knowledge page
+    if (!hasSources && inputMethod === 'none') {
       setShowNoSourceWarning(true)
       return
     }
     startAnalysis(inputMethod === 'search' && searchQuery.trim() ? { query: searchQuery.trim() } : {})
   }
 
-  const columns = ['Step', 'Actor', 'Action', 'Input', 'Time', 'Pain Point', 'Digital', 'Law / regulation']
-  // Pain point, digital status and law (the review) show only when "Analysis" is on. They are
-  // the last three columns, so hiding them keeps every other column's index (edits, review state)
-  const BASE_COLUMNS = 5
+  // every column always shows — the review's pain point, digital status and law included
+  const columns = ['Step', 'Actor', 'Action', 'Input', 'Time', 'Pain Point', 'Digital', 'Law (Government Order / Regulation / Judgement)']
   const REVIEW_COLUMN: Record<number, (typeof REVIEW_FIELDS)[number]> = { 5: 'pain_points', 6: 'digital_status', 7: 'legal_basis' }
   const toRows = (list: AsIsStep[], blank: string) => list.map((s) => {
     const pain = Array.isArray(s.pain_points)
@@ -234,23 +234,25 @@ export default function AsIsPane({ projectId }: Props) {
     setDeleted(null)
   }
 
-  const openChat = () => useNavigation.getState().requestChatOpen()
+  const openChat = () => useNavigation.getState().focusReview()
+  // review questions waiting in the chat rail
+  const reviewWaiting = useNavigation((s) => (s.reviewWaiting?.projectId === projectId ? s.reviewWaiting : null))
   const review = () => {
     setParseError(null)
     runReview(projectId).then((r) => { if (!r.ok) setParseError(r.error ?? 'Review failed. Please try again.') })
   }
 
   const sourceOptions = [
-    { id: 'files' as const, icon: Paperclip, title: 'Upload a document', sub: 'PDF, Word, Excel, scans, images — go to Files tab' },
-    { id: 'url' as const, icon: Link, title: 'Paste a URL', sub: 'Government portal, gazette, circular link' },
-    { id: 'search' as const, icon: Search, title: 'Web search', sub: 'Start now — AI researches official sources online' },
+    { id: 'files' as const, icon: Paperclip, title: 'Upload a document', sub: 'PDF, Word, Excel, scans, images — go to Knowledge' },
+    { id: 'url' as const, icon: Link, title: 'Add a web page', sub: 'A link with a short note of what to take from it' },
+    { id: 'search' as const, icon: Search, title: 'Search the web', sub: 'Official sites are listed — you accept or reject each' },
   ]
 
   return (
     <div>
 
       {/* Error banner */}
-      {parseError && !(steps.length === 0 && !hasFiles && lastRun.current) && (
+      {parseError && !(steps.length === 0 && !hasSources && lastRun.current) && (
         <Notice action={
           <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             {lastRun.current && steps.length === 0 && !isRunning && (
@@ -288,32 +290,6 @@ export default function AsIsPane({ projectId }: Props) {
         </>
       )}
 
-      {/* Web search: confirm before the AI starts */}
-      {confirmWeb && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(17,24,39,.4)', display: 'grid', placeItems: 'center', zIndex: 1000, padding: 16 }}
-          onClick={() => setConfirmWeb(false)}
-          onKeyDown={(e) => { if (e.key === 'Escape') setConfirmWeb(false) }}>
-          <div role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()} className="ui-card"
-            style={{ padding: 22, maxWidth: 420, width: '100%', boxShadow: '0 12px 40px rgba(16,24,40,.18)' }}>
-            <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-              <span style={{ width: 34, height: 34, borderRadius: 8, background: 'var(--accent-soft)', color: 'var(--accent)', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
-                <Search size={17} strokeWidth={1.9} />
-              </span>
-              <div>
-                <h3 style={{ margin: '2px 0 6px', fontSize: 16, fontWeight: 600 }}>Do you want to start the simplification?</h3>
-                <p style={{ margin: 0, fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.55 }}>
-                  The AI searches official sources online for “{project?.name}” and maps the current (AS-IS) process from them, with a reference for every step.
-                </p>
-              </div>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
-              <Button onClick={() => setConfirmWeb(false)}>No</Button>
-              <Button variant="primary" icon={Search} autoFocus onClick={() => { setConfirmWeb(false); startAnalysis() }}>Yes, start</Button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* No-source warning modal */}
       {showNoSourceWarning && (
         <div style={{
@@ -336,9 +312,7 @@ export default function AsIsPane({ projectId }: Props) {
                   className="ui-card ui-card--hover"
                   onClick={() => {
                     setShowNoSourceWarning(false)
-                    if (id === 'files') navigate(`/projects/${projectId}/files`)
-                    else if (id === 'search') setConfirmWeb(true)
-                    else setInputMethod(id)
+                    navigate(`/projects/${projectId}/files`, { state: id === 'search' ? { webSearch: true } : id === 'url' ? { addLink: true } : null })
                   }}
                   style={{ display: 'flex', gap: 12, alignItems: 'flex-start', padding: '12px 14px' }}
                 >
@@ -364,7 +338,7 @@ export default function AsIsPane({ projectId }: Props) {
 
       {/* A run that just failed: say so here (with Try again) instead of falling back to
           the source picker, which looks as if nothing had happened */}
-      {loaded && steps.length === 0 && !isRunning && !serverAsis && !hasFiles && parseError && lastRun.current && (
+      {loaded && steps.length === 0 && !isRunning && !serverAsis && !hasSources && parseError && lastRun.current && (
         <div className="ui-card" style={{ padding: '32px 24px', textAlign: 'center' }}>
           <span style={{ width: 44, height: 44, borderRadius: 12, background: 'var(--danger-soft)', color: 'var(--danger)', display: 'inline-grid', placeItems: 'center', marginBottom: 12 }}>
             <TriangleAlert size={22} strokeWidth={1.8} />
@@ -381,58 +355,30 @@ export default function AsIsPane({ projectId }: Props) {
         </div>
       )}
 
-      {loaded && steps.length === 0 && !isRunning && !serverAsis && !hasFiles && !(parseError && lastRun.current) && (
-        <>
-          <div className="ui-card" style={{
-            display: 'flex', alignItems: 'center', gap: 10,
-            padding: '10px 14px', marginBottom: 16, fontSize: 13.5, color: 'var(--muted)',
-          }}>
-            <Paperclip size={16} strokeWidth={1.8} />
-            <span>No documents uploaded yet.</span>
-            <Button size="sm" variant="ghost" iconRight={ChevronRight} style={{ marginLeft: 'auto', color: 'var(--accent)' }}
-              onClick={() => navigate(`/projects/${projectId}/files`)}>
-              Upload documents
-            </Button>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, marginBottom: 16 }}>
-            {sourceOptions.flatMap((o) => o.id === 'files' ? [] : [{ ...o, id: o.id }]).map(({ id, icon: Icon, title, sub }) => (
-              <button
-                key={id}
-                className="ui-card ui-card--hover"
-                onClick={() => (id === 'search' ? setConfirmWeb(true) : setInputMethod((m) => m === id ? 'none' : id))}
-                style={{
-                  padding: '16px', display: 'flex', flexDirection: 'column', gap: 6,
-                  ...(inputMethod === id ? { borderColor: 'var(--accent)', background: 'var(--accent-soft)' } : {}),
-                }}
-              >
-                <span style={{ width: 34, height: 34, borderRadius: 8, background: 'var(--accent-soft)', color: 'var(--accent)', display: 'grid', placeItems: 'center' }}>
-                  <Icon size={18} strokeWidth={1.8} />
+      {/* No sources yet: they are chosen on the Knowledge page — nothing is mapped until the user starts it */}
+      {loaded && steps.length === 0 && !isRunning && !serverAsis && !hasSources && !(parseError && lastRun.current) && (
+        <div className="ui-card" style={{ padding: '28px 24px', textAlign: 'center' }}>
+          <span style={{ width: 44, height: 44, borderRadius: 12, background: 'var(--accent-soft)', color: 'var(--accent)', display: 'inline-grid', placeItems: 'center', marginBottom: 12 }}>
+            <Workflow size={22} strokeWidth={1.8} />
+          </span>
+          <h3 style={{ margin: '0 0 6px', fontSize: 16, fontWeight: 600 }}>No sources yet</h3>
+          <p style={{ color: 'var(--muted)', margin: '0 auto 16px', fontSize: 14, maxWidth: 480, lineHeight: 1.6 }}>
+            The AS-IS is made from the documents you upload and the web sites you accept on the Knowledge page.
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10, textAlign: 'left' }}>
+            {sourceOptions.map(({ id, icon: Icon, title, sub }) => (
+              <button key={id} className="ui-card ui-card--hover"
+                onClick={() => navigate(`/projects/${projectId}/files`, { state: id === 'search' ? { webSearch: true } : id === 'url' ? { addLink: true } : null })}
+                style={{ padding: '14px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <span style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--accent-soft)', color: 'var(--accent)', display: 'grid', placeItems: 'center' }}>
+                  <Icon size={17} strokeWidth={1.8} />
                 </span>
-                <strong style={{ fontSize: 14, fontWeight: 600, marginTop: 4 }}>{title}</strong>
+                <strong style={{ fontSize: 14, fontWeight: 600, marginTop: 2 }}>{title}</strong>
                 <small style={{ color: 'var(--muted)', fontSize: 12.5 }}>{sub}</small>
               </button>
             ))}
           </div>
-
-          {inputMethod === 'url' && (
-            <div style={{ marginBottom: 16, display: 'flex', gap: 8 }}>
-              <input
-                className="ui-input"
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                placeholder="https://…"
-                autoFocus
-                onKeyDown={(e) => { if (e.key === 'Enter' && url.trim()) startAnalysis({ url: url.trim() }) }}
-              />
-              <Button icon={Link} onClick={() => { if (url.trim()) startAnalysis({ url: url.trim() }) }}>Fetch & analyse</Button>
-            </div>
-          )}
-
-          <Button variant="primary" icon={Workflow} onClick={handleGenerate} disabled={filesBusy} style={{ height: 42, padding: '0 20px' }}>
-            Generate AS-IS process
-          </Button>
-        </>
+        </div>
       )}
 
       {/* Files still being processed: the AS-IS waits for all of them */}
@@ -460,14 +406,14 @@ export default function AsIsPane({ projectId }: Props) {
       )}
 
       {/* No AS-IS yet, documents ready: the user starts it */}
-      {steps.length === 0 && !isRunning && !serverAsis && hasFiles && filesLoaded && !filesBusy && (
+      {steps.length === 0 && !isRunning && !serverAsis && hasSources && filesLoaded && !filesBusy && (
         <div className="ui-card" style={{ padding: '40px 24px', textAlign: 'center' }}>
           <span style={{ width: 44, height: 44, borderRadius: 12, background: 'var(--accent-soft)', color: 'var(--accent)', display: 'inline-grid', placeItems: 'center', marginBottom: 14 }}>
             <Workflow size={22} strokeWidth={1.8} />
           </span>
           <h3 style={{ margin: '0 0 6px', fontSize: 16, fontWeight: 600 }}>No AS-IS process yet</h3>
           <p style={{ color: 'var(--muted)', margin: '0 auto 16px', fontSize: 14, maxWidth: 460, lineHeight: 1.6 }}>
-            {uploadedFiles.length} document{uploadedFiles.length > 1 ? 's are' : ' is'} ready. The AI maps the current process from them, step by step, with a reference for every step.
+            {[hasFiles ? `${uploadedFiles.length} document${uploadedFiles.length > 1 ? 's' : ''}` : '', acceptedWeb ? `${acceptedWeb} accepted web source${acceptedWeb > 1 ? 's' : ''}` : ''].filter(Boolean).join(' and ')} ready. The AI maps the current process from them, step by step, with a reference for every step.
           </p>
           <Button variant="primary" icon={Workflow} onClick={() => startAnalysis()} style={{ height: 42, padding: '0 20px' }}>Generate AS-IS process</Button>
         </div>
@@ -489,20 +435,12 @@ export default function AsIsPane({ projectId }: Props) {
               // { value: 'flow', label: 'Flowchart', icon: GitBranch },
               // { value: 'sheets', label: 'Sheets', icon: ClipboardList },
             ]}
-            info={`${steps.length} steps · ${project?.tcvq?.asis.time_days ?? 0} days · ${project?.tcvq?.asis.visits ?? 0} visits`}
             actions={<>
-              {tab === 'table' && (
-                <Button size="sm" icon={ScanSearch} variant={showAnalysis ? 'active' : 'default'} aria-pressed={showAnalysis}
-                  title={showAnalysis ? 'Hide pain point, digital status and law' : 'Show pain point, digital status and law'}
-                  onClick={() => setShowAnalysis((v) => !v)}>Analysis</Button>
-              )}
-              <a className="ui-btn ui-btn--sm" href={BASE + projectsApi.currentExportUrl(projectId, 'asis')} download>
-                <FileSpreadsheet size={15} strokeWidth={1.8} /> Excel
-              </a>
-              <Button size="sm" icon={Download} onClick={() => {
-                if (tab === 'flow' && flowRef.current) downloadSvg(flowRef.current, `${fileBase}-flowchart.svg`)
-                else if (bpmnRef.current) downloadPng(bpmnRef.current, `${fileBase}-bpmn.png`)
-              }}>{tab === 'flow' ? 'Flowchart' : 'BPMN'}</Button>
+              <DownloadMenu items={[
+                { label: 'Excel (table)', icon: FileSpreadsheet, href: BASE + projectsApi.currentExportUrl(projectId, 'asis') },
+                { label: 'BPMN diagram (PNG)', icon: Waypoints, onClick: () => { if (bpmnRef.current) downloadPng(bpmnRef.current, `${fileBase}-bpmn.png`) } },
+                ...(tab === 'flow' ? [{ label: 'Flowchart (SVG)', icon: Download, onClick: () => { if (flowRef.current) downloadSvg(flowRef.current, `${fileBase}-flowchart.svg`) } }] : []),
+              ]} />
               <Button size="sm" icon={RotateCw} disabled={filesBusy || tobeLocked} title={filesBusy ? busyLabel : undefined} onClick={regenerateAsis}>Regenerate</Button>
             </>}
             onExpandToggle={() => { if (tab === 'flow' || tab === 'sheets') setTab('table'); setExpanded(true) }}
@@ -521,8 +459,18 @@ export default function AsIsPane({ projectId }: Props) {
             />
           )}
 
+          {reviewWaiting && !isApproved && gate !== 'pending' && (
+            <button type="button" className="rv-banner" onClick={openChat}>
+              <span className="rv-banner__icon"><MessageSquare size={17} strokeWidth={2} /><span className="rv-banner__count">{reviewWaiting.open}</span></span>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <strong>The assistant has {reviewWaiting.open} question{reviewWaiting.open > 1 ? 's' : ''} about this AS-IS</strong>
+                <small>{reviewWaiting.topic ? `Starting with ${reviewWaiting.topic.toLowerCase()} — ` : ''}your answers fill the empty cells in the table.</small>
+              </span>
+              <span className="rv-banner__go">Answer in chat <ArrowRight size={15} /></span>
+            </button>
+          )}
           {gate === 'pending' && (
-            <Notice tone="warn" action={<Button size="sm" onClick={openChat}>Open chat</Button>}>
+            <Notice tone="warn" action={<Button size="sm" variant="primary" icon={ArrowRight} onClick={openChat}>Answer in chat</Button>}>
               <TriangleAlert size={16} style={{ flexShrink: 0 }} />
               <span>Answer the {cov.pending} open item{cov.pending > 1 ? 's' : ''} in the chat (web suggestions: Use / Don't use · values with no source: Yes / No / Skip) before approving the AS-IS.</span>
             </Notice>
@@ -558,8 +506,8 @@ export default function AsIsPane({ projectId }: Props) {
           <div style={{ marginTop: 10 }}>
             {tab === 'table' && (
               <TableViewer boldColumns={[2]}
-                columns={showAnalysis ? columns : columns.slice(0, BASE_COLUMNS)}
-                rows={showAnalysis ? rows : rows.map((r) => r.slice(0, BASE_COLUMNS))}
+                columns={columns}
+                rows={rows}
                 sources={sources}
                 cellMeta={cellMeta}
                 onDeleteRow={tobeLocked || asisFrozen ? undefined : deleteStep}
@@ -585,7 +533,6 @@ export default function AsIsPane({ projectId }: Props) {
                 background: 'var(--surface)',
               }}>
                 <strong style={{ fontSize: 15, fontWeight: 600 }}>AS-IS Process</strong>
-                <span style={{ color: 'var(--muted)', fontSize: 13 }}>{steps.length} steps</span>
                 <Segmented value={tab === 'bpmn' ? 'bpmn' : 'table'} onChange={setTab} options={[
                   { value: 'table', label: 'Table', icon: Table2 },
                   { value: 'bpmn', label: 'BPMN', icon: Waypoints },
@@ -596,8 +543,8 @@ export default function AsIsPane({ projectId }: Props) {
               {tab === 'table' && (
                 <div style={{ flex: 1, overflow: 'auto' }}>
                   <TableViewer boldColumns={[2]}
-                    columns={showAnalysis ? columns : columns.slice(0, BASE_COLUMNS)}
-                    rows={showAnalysis ? rows : rows.map((r) => r.slice(0, BASE_COLUMNS))}
+                    columns={columns}
+                    rows={rows}
                     sources={sources}
                     cellMeta={cellMeta}
                     onDeleteRow={tobeLocked || asisFrozen ? undefined : deleteStep}

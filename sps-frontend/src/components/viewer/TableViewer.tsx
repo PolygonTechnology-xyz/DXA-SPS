@@ -92,11 +92,11 @@ function EditableCell({ value, onChange, kind, sources, meta, readOnly }: Editab
       // the step number (badge) is not typed in — steps are numbered by their order
       onClick={() => { if (!meta?.state && !readOnly && kind !== 'badge') setEditing(true) }}
       style={{
-        padding: editing ? 4 : '7px 9px',
+        padding: editing ? 3 : '4px 8px',
         borderBottom: '1px solid var(--line)',
         borderRight: '1px solid var(--line)',
         verticalAlign: 'top',
-        lineHeight: 1.45,
+        lineHeight: 1.35,
         overflowWrap: 'anywhere',
         color: kind === 'label' ? 'var(--ink-2)' : 'var(--ink)',
         background: editing ? 'var(--accent-soft)' : meta?.state === 'pending' ? '#fffbeb' : 'var(--surface)',
@@ -142,7 +142,8 @@ function EditableCell({ value, onChange, kind, sources, meta, readOnly }: Editab
 // than that, the table scrolls sideways (with a scrollbar pinned to the screen bottom).
 const COLUMN_MIN: Record<string, number> = {
   Step: 48, Actor: 140, Action: 260, Input: 130, Time: 60, Channel: 100,
-  'Pain Point': 170, Digital: 140, 'Law / regulation': 170, Rationale: 200, 'Legal basis': 160,
+  'Pain Point': 170, Digital: 140, 'Law (Government Order / Regulation / Judgement)': 190, Rationale: 200, 'Legal basis': 160,
+  'How it is digitalized': 220, 'If rejected / returned': 220, 'World best practice': 240,
 }
 const DEFAULT_MIN = 140
 const DELETE_COL = 30
@@ -267,7 +268,7 @@ export default function TableViewer({ columns, rows: initialRows, fullScreen, bo
           style={{
             borderCollapse: 'separate',
             borderSpacing: 0,
-            fontSize: 12.5,
+            fontSize: 12,
             tableLayout: 'fixed',
             width: '100%',
             minWidth: minTableWidth,
@@ -299,17 +300,17 @@ export default function TableViewer({ columns, rows: initialRows, fullScreen, bo
                     zIndex: 2,
                     background: 'var(--surface)',
                     textAlign: 'left',
-                    padding: '7px 9px',
+                    padding: '5px 8px',
                     borderBottom: '1px solid var(--line)',
                     borderRight: '1px solid var(--line)',
                     fontSize: 10.5,
+                    lineHeight: 1.3,
+                    verticalAlign: 'bottom',
                     fontWeight: 600,
                     textTransform: 'uppercase',
                     letterSpacing: '.05em',
                     color: 'var(--muted)',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
+                    overflowWrap: 'anywhere',
                   }}
                 >
                   {c}
@@ -331,7 +332,7 @@ export default function TableViewer({ columns, rows: initialRows, fullScreen, bo
                     background: 'var(--surface)',
                     textAlign: 'center',
                     verticalAlign: 'top',
-                    paddingTop: 5,
+                    paddingTop: 1,
                   }}
                 >
                   <IconButton icon={Trash2} label="Delete step" size="sm" danger onClick={() => setConfirmRow(ri)} style={{ color: 'var(--muted)' }} />
@@ -362,7 +363,7 @@ export default function TableViewer({ columns, rows: initialRows, fullScreen, bo
         />
       )}
       {!readOnly && (
-        <div style={{ padding: '7px 9px', borderTop: '1px solid var(--line)' }}>
+        <div style={{ padding: '4px 8px', borderTop: '1px solid var(--line)' }}>
           <Button size="sm" icon={Plus} onClick={addRow}>Add step</Button>
         </div>
       )}

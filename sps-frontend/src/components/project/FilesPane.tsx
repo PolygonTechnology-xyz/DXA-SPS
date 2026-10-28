@@ -6,6 +6,7 @@ import { useProjectFiles } from '@/lib/files'
 import { FileText, FileSpreadsheet, Image, File as FileIcon, UploadCloud, Download, Trash2, ArrowRight, CircleCheck, Eye, TriangleAlert, RotateCw, Workflow } from 'lucide-react'
 import { Button, IconButton, PageHeader, Spinner } from '@/components/ui'
 import { useVersions, nextVersion, refreshAfterVersionChange } from '@/components/project/Versions'
+import WebSources, { useWebSources } from '@/components/project/WebSources'
 
 function formatSize(bytes: number): string {
   if (bytes > 1048576) return (bytes / 1048576).toFixed(1) + ' MB'
@@ -90,61 +91,111 @@ export default function FilesPane({ projectId, library }: Props) {
   return (
     <div>
       <PageHeader
-        title={library ? 'Global Knowledge' : 'Files & Documents'}
+        title={library ? 'Global Knowledge' : 'Knowledge'}
         subtitle={library
           ? 'Laws, rules, circulars and guidelines shared by every project (e.g. the SPS guideline, Secretariat Instructions, GRS). The agents search them for the legal basis and SPS rules, and cite them as K1, K2…'
-          : 'The AI searches and reads these documents page by page during analysis — laws, circulars, SOPs, forms.'}
+          : undefined}
       />
 
-      {/* Drop zone */}
-      <div
-        onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={(e) => { e.preventDefault(); setDragging(false); uploadFiles(e.dataTransfer.files) }}
-        onClick={() => inputRef.current?.click()}
-        style={{
-          border: `1.5px dashed ${dragging ? 'var(--accent)' : 'var(--line-strong)'}`,
-          borderRadius: 'var(--radius)',
-          padding: '28px 20px',
-          background: dragging ? 'var(--accent-soft)' : 'var(--surface)',
-          cursor: 'pointer',
-          textAlign: 'center',
-          marginBottom: 20,
-          transition: 'border-color .15s, background .15s',
-        }}
-      >
-        <input ref={inputRef} type="file" multiple hidden onChange={(e) => uploadFiles(e.target.files)} />
-        <span style={{ width: 42, height: 42, borderRadius: 10, background: 'var(--accent-soft)', color: 'var(--accent)', display: 'inline-grid', placeItems: 'center', marginBottom: 10 }}>
-          <UploadCloud size={21} strokeWidth={1.8} />
-        </span>
-        <p style={{ margin: 0, color: 'var(--ink)', fontSize: 14, fontWeight: 500 }}>
-          Drop files here or <span style={{ color: 'var(--accent)' }}>click to upload</span>
-        </p>
-        <p style={{ margin: '4px 0 0', color: 'var(--muted)', fontSize: 12 }}>
-          PDF, Word, Excel, PowerPoint, text and images — scanned pages and Bangla are read too
-        </p>
-      </div>
-
-      {/* Upload progress */}
-      {uploading.length > 0 && (
-        <div className="ui-card" style={{ padding: '12px 16px', marginBottom: 12 }}>
-          <p style={{ margin: '0 0 8px', fontSize: 13, fontWeight: 600 }}>
-            Uploading {uploading.length} file{uploading.length > 1 ? 's' : ''}…
-          </p>
-          {uploading.map((name) => (
-            <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '3px 0' }}>
-              <Spinner size={13} />
-              <span>{name}</span>
+      {/* web sources and documents side by side, then the AS-IS button below both */}
+      <div className={library ? undefined : 'kb-cols'}>
+        {!library && <WebSources projectId={projectId} />}
+        <section className={library ? undefined : 'ui-card kb-docs kb-col'}>
+          {!library && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+              <span style={{ width: 30, height: 30, borderRadius: 8, background: 'var(--accent-soft)', color: 'var(--accent)', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+                <FileText size={16} strokeWidth={1.9} />
+              </span>
+              <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>Documents</h3>
             </div>
-          ))}
-        </div>
-      )}
+          )}
 
-      {uploadError && (
-        <div className="ui-card" style={{ padding: '10px 14px', marginBottom: 12, borderColor: 'var(--danger-line)', background: 'var(--danger-soft)', color: 'var(--danger)', fontSize: 13 }}>
-          {uploadError}
-        </div>
-      )}
+          {/* Drop zone */}
+          <div
+            onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={(e) => { e.preventDefault(); setDragging(false); uploadFiles(e.dataTransfer.files) }}
+            onClick={() => inputRef.current?.click()}
+            style={{
+              border: `1.5px dashed ${dragging ? 'var(--accent)' : 'var(--line-strong)'}`,
+              borderRadius: 'var(--radius)',
+              padding: '22px 16px',
+              background: dragging ? 'var(--accent-soft)' : 'var(--surface)',
+              cursor: 'pointer',
+              textAlign: 'center',
+              marginBottom: 14,
+              transition: 'border-color .15s, background .15s',
+            }}
+          >
+            <input ref={inputRef} type="file" multiple hidden onChange={(e) => uploadFiles(e.target.files)} />
+            <span style={{ width: 42, height: 42, borderRadius: 10, background: 'var(--accent-soft)', color: 'var(--accent)', display: 'inline-grid', placeItems: 'center', marginBottom: 10 }}>
+              <UploadCloud size={21} strokeWidth={1.8} />
+            </span>
+            <p style={{ margin: 0, color: 'var(--ink)', fontSize: 14, fontWeight: 500 }}>
+              Drop files here or <span style={{ color: 'var(--accent)' }}>click to upload</span>
+            </p>
+            <p style={{ margin: '4px 0 0', color: 'var(--muted)', fontSize: 12 }}>
+              PDF, Word, Excel, PowerPoint, text and images — scanned pages and Bangla are read too
+            </p>
+          </div>
+
+          {/* uploads and the file list scroll inside the box; the drop zone stays */}
+          <div className={library ? undefined : 'kb-scroll'}>
+          {/* Upload progress */}
+          {uploading.length > 0 && (
+            <div className="ui-card" style={{ padding: '12px 16px', marginBottom: 12 }}>
+              <p style={{ margin: '0 0 8px', fontSize: 13, fontWeight: 600 }}>
+                Uploading {uploading.length} file{uploading.length > 1 ? 's' : ''}…
+              </p>
+              {uploading.map((name) => (
+                <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '3px 0' }}>
+                  <Spinner size={13} />
+                  <span>{name}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {uploadError && (
+            <div className="ui-card" style={{ padding: '10px 14px', marginBottom: 12, borderColor: 'var(--danger-line)', background: 'var(--danger-soft)', color: 'var(--danger)', fontSize: 13 }}>
+              {uploadError}
+            </div>
+          )}
+          {/* File list */}
+          {isLoading ? (
+            <p style={{ color: 'var(--muted)', fontSize: 14 }}>Loading files…</p>
+          ) : files.length === 0 ? null : (
+            <>
+            {/* how many files, and what the AI can do with them */}
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', margin: '0 0 10px', fontSize: 13 }}>
+              <strong style={{ fontSize: 14 }}>{files.length} file{files.length === 1 ? '' : 's'} uploaded</strong>
+              <span style={{ color: 'var(--muted)' }}>
+                {[
+                  counts.ready && `${counts.ready} ready`,
+                  counts.visual && `${counts.visual} read as images`,
+                  counts.processing && `${counts.processing} processing`,
+                  counts.failed && `${counts.failed} failed`,
+                ].filter(Boolean).join(' · ')}
+              </span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {files.map((f) => (
+                <FileRow
+                  key={f.id}
+                  file={f}
+                  projectId={projectId}
+                  onRetry={() => retry(f.id)}
+                  onDelete={() => {
+                    if (confirm(`Delete "${f.name}"?`)) deleteMutation.mutate(f.id)
+                  }}
+                />
+              ))}
+            </div>
+            </>
+          )}
+          </div>
+        </section>
+      </div>
 
       {/* Next step — only once every file is processed */}
       {!library && <div className="ui-card" style={{
@@ -153,55 +204,20 @@ export default function FilesPane({ projectId, library }: Props) {
       }}>
         <div>
           <p style={{ margin: 0, fontWeight: 600, fontSize: 14 }}>{busy || uploading.length ? 'Preparing your documents…' : 'Ready to analyse?'}</p>
-          <p style={{ margin: '2px 0 0', fontSize: 13, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
-            {busy || uploading.length
-              ? <><Spinner size={12} /> {uploading.length ? `Uploading ${uploading.length} file${uploading.length > 1 ? 's' : ''}…` : busyLabel}</>
-              : failed.length
-                ? `${failed.length} file${failed.length > 1 ? 's' : ''} could not be read and will be left out — retry or remove ${failed.length > 1 ? 'them' : 'it'}.`
-                : 'All documents are ready. The AI uses them automatically.'}
-          </p>
+          {/* only progress and problems — no status summary */}
+          {(busy || uploading.length > 0 || failed.length > 0) && (
+            <p style={{ margin: '2px 0 0', fontSize: 13, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
+              {busy || uploading.length
+                ? <><Spinner size={12} /> {uploading.length ? `Uploading ${uploading.length} file${uploading.length > 1 ? 's' : ''}…` : busyLabel}</>
+                : `${failed.length} file${failed.length > 1 ? 's' : ''} could not be read and will be left out — retry or remove ${failed.length > 1 ? 'them' : 'it'}.`}
+            </p>
+          )}
         </div>
         <Button variant="primary" iconRight={ArrowRight} disabled={busy || uploading.length > 0} onClick={() => setConfirmStart(true)}>Go to AS-IS</Button>
       </div>}
 
       {confirmStart && <StartAsisDialog projectId={projectId} onClose={() => setConfirmStart(false)} />}
 
-      {/* File list */}
-      {isLoading ? (
-        <p style={{ color: 'var(--muted)', fontSize: 14 }}>Loading files…</p>
-      ) : files.length === 0 ? (
-        <p style={{ color: 'var(--muted)', fontSize: 14 }}>
-          No documents uploaded yet. Add files above — the AI will use them automatically.
-        </p>
-      ) : (
-        <>
-        {/* how many files, and what the AI can do with them */}
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', margin: '0 0 10px', fontSize: 13 }}>
-          <strong style={{ fontSize: 14 }}>{files.length} file{files.length === 1 ? '' : 's'} uploaded</strong>
-          <span style={{ color: 'var(--muted)' }}>
-            {[
-              counts.ready && `${counts.ready} ready`,
-              counts.visual && `${counts.visual} read as images`,
-              counts.processing && `${counts.processing} processing`,
-              counts.failed && `${counts.failed} failed`,
-            ].filter(Boolean).join(' · ')}
-          </span>
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {files.map((f) => (
-            <FileRow
-              key={f.id}
-              file={f}
-              projectId={projectId}
-              onRetry={() => retry(f.id)}
-              onDelete={() => {
-                if (confirm(`Delete "${f.name}"?`)) deleteMutation.mutate(f.id)
-              }}
-            />
-          ))}
-        </div>
-        </>
-      )}
     </div>
   )
 }
@@ -279,6 +295,7 @@ function StartAsisDialog({ projectId, onClose }: { projectId: string; onClose: (
   const { data: project } = useQuery({ queryKey: ['project', projectId], queryFn: () => projectsApi.get(projectId) })
   const { data: versions } = useVersions(projectId)
   const { files } = useProjectFiles(projectId)
+  const accepted = useWebSources(projectId).accepted.length
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -314,7 +331,9 @@ function StartAsisDialog({ projectId, onClose }: { projectId: string; onClose: (
           <div style={{ minWidth: 0 }}>
             <h3 style={{ margin: '2px 0 6px', fontSize: 16, fontWeight: 600 }}>Start the AS-IS?</h3>
             <p style={{ margin: 0, fontSize: 13.5, color: 'var(--ink-2)', lineHeight: 1.55 }}>
-              The AI maps the current process from your {files.length} document{files.length === 1 ? '' : 's'}, with a reference for every step.
+              {files.length || accepted
+                ? <>The AI maps the current process from your {[files.length ? `${files.length} document${files.length === 1 ? '' : 's'}` : '', accepted ? `${accepted} accepted web source${accepted === 1 ? '' : 's'}` : ''].filter(Boolean).join(' and ')}, with a reference for every step.</>
+                : <>Nothing to map from yet — upload a document or accept a web source first.</>}
             </p>
             {hasAsis && locked && (
               <p style={{ margin: '8px 0 0', fontSize: 13.5, color: 'var(--ink-2)', lineHeight: 1.55 }}>
@@ -332,7 +351,7 @@ function StartAsisDialog({ projectId, onClose }: { projectId: string; onClose: (
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18, flexWrap: 'wrap' }}>
           <Button disabled={busy} onClick={() => { onClose(); navigate(`/projects/${projectId}/asis`) }}>No, just open the AS-IS</Button>
-          <Button variant="primary" icon={Workflow} loading={busy} autoFocus onClick={start}>
+          <Button variant="primary" icon={Workflow} loading={busy} autoFocus onClick={start} disabled={!files.length && !accepted}>
             {hasAsis && locked ? `Yes, create v${next.number}` : 'Yes, start'}
           </Button>
         </div>

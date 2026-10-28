@@ -8,10 +8,12 @@ import ChatMessage from '@/components/chat/ChatMessage'
 import TypingIndicator from '@/components/chat/TypingIndicator'
 import type { ChatMessage as Msg } from '@/api/session'
 import type { LucideIcon } from 'lucide-react'
-import { Pencil, Plus, Trash2, ArrowUpDown, Merge, FolderOpen, Workflow, Target, MessageSquare, ChevronsRight, SendHorizontal, Undo2, Play, Eraser, Brain, Search, BookOpen, ListChecks, CircleHelp, Globe, FilePlus, Lock, GitBranchPlus, Paperclip } from 'lucide-react'
+import { Pencil, Plus, Trash2, ArrowUpDown, Merge, FolderOpen, Workflow, Target, MessageSquare, ChevronsRight, ArrowUp, Undo2, Play, Eraser, Brain, Search, BookOpen, ListChecks, CircleHelp, Globe, FilePlus, Lock, GitBranchPlus, Mic, Square, FileText } from 'lucide-react'
 import MemoryPanel from '@/components/project/MemoryPanel'
 import ConsentCard from '@/components/project/ConsentCard'
+import ReviewSteps from '@/components/project/ReviewSteps'
 import { Button, IconButton, Spinner } from '@/components/ui'
+import { useVoiceRecorder } from '@/hooks/useVoiceRecorder'
 import { useVersions, nextVersion, refreshAfterVersionChange } from '@/components/project/Versions'
 
 let railMsgCounter = 0
@@ -44,6 +46,16 @@ interface Props {
 
 /** A message in the rail: text, or a card drawn from its payload */
 type RailMsg = Msg & { kind?: StoredChatMessage['kind']; payload?: StoredChatMessage['payload'] }
+
+// The rail's width: dragged on its left edge, remembered in this browser
+const WIDTH_KEY = 'sps.chatWidth'
+const DEFAULT_WIDTH = 420
+const MIN_WIDTH = 320
+const maxWidth = () => Math.max(MIN_WIDTH, Math.min(900, Math.round(window.innerWidth * 0.6)))
+const clampWidth = (w: number) => Math.round(Math.min(maxWidth(), Math.max(MIN_WIDTH, w)))
+function readWidth(): number {
+  try { const w = Number(localStorage.getItem(WIDTH_KEY)); return w ? clampWidth(w) : DEFAULT_WIDTH } catch { return DEFAULT_WIDTH }
+}
 
 const GREETING: RailMsg = {
   id: 'greeting',
@@ -79,11 +91,21 @@ export default function ChatRail({ projectId, pane, onClose }: Props) {
     })),
     ...live.msgs.slice(Math.max(0, saved.length - live.base)),
   // the reply placeholder stays hidden until text arrives — the typing dots show meanwhile
-  ].filter((m) => m.role !== 'assistant' || m.content.trim() || m.kind === 'consent')
+  ].filter((m) => m.role !== 'assistant' || m.content.trim() || m.kind === 'consent' || m.kind === 'review_steps')
+
+
+  // only the newest review card tells the page what is still open
+  const latestReviewId = [...messages].reverse().find((m) => m.kind === 'review_steps')?.id
+
+  useEffect(() => {
+    if (historyLoaded && !latestReviewId) useNavigation.getState().setReviewWaiting(null)
+  }, [historyLoaded, latestReviewId])
 
   const [confirmClear, setConfirmClear] = useState(false)
   const [showMemory, setShowMemory] = useState(false)
   const [typing, setTyping] = useState(false)
+  // the reply being written: hidden until it is complete — one box, with the full answer
+  const writingId = typing ? live.msgs.find((m) => m.role === 'assistant')?.id : undefined
   const [activeTool, setActiveTool] = useState<string | null>(null)
   const [input, setInput] = useState('')
   const [pendingAction, setPendingActionLocal] = useState<{ name: string; payload: Record<string, unknown> } | null>(null)
@@ -95,6 +117,57 @@ export default function ChatRail({ projectId, pane, onClose }: Props) {
 
   const endRef = useRef<HTMLDivElement>(null)
   const stopRef = useRef<(() => void) | null>(null)
+
+  const [width, setWidth] = useState(readWidth)
+  const [resizing, setResizing] = useState(false)
+  function startResize(e: React.PointerEvent<HTMLDivElement>) {
+    e.preventDefault()
+    const startX = e.clientX
+    const startW = width
+    let latest = startW
+    setResizing(true)
+    // the rail sits on the right: dragging left makes it wider
+    const move = (ev: PointerEvent) => { latest = clampWidth(startW + (startX - ev.clientX)); setWidth(latest) }
+    const up = () => {
+      setResizing(false)
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      try { localStorage.setItem(WIDTH_KEY, String(latest)) } catch { /* private window */ }
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
+  function resetWidth() {
+    setWidth(DEFAULT_WIDTH)
+    try { localStorage.setItem(WIDTH_KEY, String(DEFAULT_WIDTH)) } catch { /* private window */ }
+  }
+  const inputRef = useRef<HTMLTextAreaElement>(null)
+  const pickerRef = useRef<HTMLInputElement>(null)
+
+  // the box grows with the text, up to about 10 lines
+  useEffect(() => {
+    const el = inputRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(Math.max(el.scrollHeight, 72), 240)}px`
+  }, [input])
+
+  // "+": documents go straight into the project's Knowledge (read and indexed in the background)
+  const [upload, setUpload] = useState<{ busy: string[]; done: string[]; failed: string[] }>({ busy: [], done: [], failed: [] })
+  const [dropping, setDropping] = useState(false)
+  async function uploadFiles(raw: FileList | null) {
+    if (!raw?.length || upload.busy.length) return
+    const list = Array.from(raw)
+    setUpload({ busy: list.map((f) => f.name), done: [], failed: [] })
+    const results = await Promise.allSettled(list.map((f) => projectsApi.uploadFile(projectId, f)))
+    setUpload({
+      busy: [],
+      done: list.filter((_, i) => results[i].status === 'fulfilled').map((f) => f.name),
+      failed: list.filter((_, i) => results[i].status === 'rejected').map((f) => f.name),
+    })
+    qc.invalidateQueries({ queryKey: ['files', projectId] })
+    qc.invalidateQueries({ queryKey: ['project', projectId] })
+  }
 
   // A different project: its own conversation
   useEffect(() => {
@@ -151,6 +224,9 @@ export default function ChatRail({ projectId, pane, onClose }: Props) {
       setLive((l) => ({ base: saved.length, msgs: [...l.msgs.slice(Math.max(0, saved.length - l.base)), { id: mkId(), role: 'assistant', content: 'Changes undone.' }] }))
     })
   }
+
+  // Voice: the transcript is sent like a typed message
+  const voice = useVoiceRecorder((text) => send(text))
 
   function send(text: string) {
     text = text.trim()
@@ -289,9 +365,25 @@ export default function ChatRail({ projectId, pane, onClose }: Props) {
 
   return (
     <aside style={{
-      width: 380, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0,
+      width, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0, position: 'relative',
       background: 'var(--surface)', borderLeft: '1px solid var(--line)',
     }}>
+      {/* drag to make the rail wider or narrower; double-click for the default width */}
+      <div
+        className={`rail-resize${resizing ? ' rail-resize--on' : ''}`}
+        role="separator" aria-orientation="vertical" aria-label="Resize the chat" title="Drag to resize · double-click to reset"
+        tabIndex={0}
+        onPointerDown={startResize}
+        onDoubleClick={resetWidth}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+            const w = clampWidth(width + (e.key === 'ArrowLeft' ? 24 : -24))
+            setWidth(w)
+            try { localStorage.setItem(WIDTH_KEY, String(w)) } catch { /* private window */ }
+          }
+        }}
+      />
+      {resizing && <div style={{ position: 'fixed', inset: 0, zIndex: 50, cursor: 'col-resize' }} />}
       {/* Header */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -325,7 +417,10 @@ export default function ChatRail({ projectId, pane, onClose }: Props) {
 
       {/* Messages */}
       <div className="ui-scroll-hover" style={{ flex: 1, overflowY: 'auto', padding: '18px 16px 0' }}>
-        {messages.map((m) => (m.kind === 'consent' && m.payload?.finding_ids
+        {messages.filter((m) => m.id !== writingId).map((m) => (m.kind === 'review_steps' && m.payload?.topics
+          ? <ReviewSteps key={m.id} cardId={m.id} latest={m.id === latestReviewId} createdAt={m.createdAt} projectId={projectId} project={project} topics={m.payload.topics} sources={m.payload.sources}
+              busy={typing || !historyLoaded} onAnswer={(text) => send(text)} />
+          : m.kind === 'consent' && m.payload?.finding_ids
           ? <ConsentCard key={m.id} projectId={projectId} project={project} findingIds={m.payload.finding_ids} lang={m.payload.lang} mode={m.payload.mode} />
           : <ChatMessage key={m.id} message={m} compact sources={m.payload?.sources} />))}
 
@@ -428,25 +523,75 @@ export default function ChatRail({ projectId, pane, onClose }: Props) {
       </div>
 
       {/* Input */}
-      <div style={{
-        display: 'flex', gap: 8, padding: '14px 16px',
-        borderTop: '1px solid var(--line)', alignItems: 'center', flexShrink: 0,
-      }}>
-        {/* uploading happens on the Files tab */}
-        <IconButton icon={Paperclip} label="Upload documents" onClick={() => navigate(`/projects/${projectId}/files`)}
-          style={{ height: 42, width: 42, flexShrink: 0, color: pane === 'files' ? 'var(--accent)' : 'var(--muted)' }} />
-        <input
-          className="ui-input"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) send(input) }}
-          placeholder="Edit a step, ask a question, or give an instruction…"
-          disabled={typing || !historyLoaded}
-          style={{ flex: 1, minWidth: 0, height: 42 }}
-        />
-        <Button variant="primary" icon={SendHorizontal} onClick={() => send(input)} disabled={!input.trim() || typing} style={{ height: 42 }}>
-          Send
-        </Button>
+      <div style={{ padding: '12px 14px 14px', borderTop: '1px solid var(--line)', flexShrink: 0 }}>
+        {(voice.error || upload.busy.length > 0 || upload.done.length > 0 || upload.failed.length > 0) && (
+          <div style={{ fontSize: 12.5, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            {voice.error && <span style={{ color: 'var(--danger)' }}>{voice.error}</span>}
+            {upload.busy.length > 0 && (
+              <span style={{ color: 'var(--muted)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <Spinner size={12} /> Uploading {upload.busy.length} file{upload.busy.length > 1 ? 's' : ''}…
+              </span>
+            )}
+            {upload.done.length > 0 && (
+              <span style={{ color: 'var(--ink-2)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <FileText size={13} style={{ color: 'var(--accent)' }} />
+                {upload.done.length === 1 ? upload.done[0] : `${upload.done.length} files`} added to
+                <button type="button" onClick={() => navigate(`/projects/${projectId}/files`)}
+                  style={{ border: 0, background: 'none', padding: 0, color: 'var(--accent)', cursor: 'pointer', font: 'inherit' }}>
+                  Knowledge
+                </button>
+              </span>
+            )}
+            {upload.failed.length > 0 && <span style={{ color: 'var(--danger)' }}>Could not upload: {upload.failed.join(', ')}</span>}
+          </div>
+        )}
+        <div
+          className={`composer${dropping ? ' composer--drop' : ''}`}
+          style={{ padding: '10px 10px 8px 14px', borderRadius: 16 }}
+          onDragOver={(e) => { e.preventDefault(); setDropping(true) }}
+          onDragLeave={() => setDropping(false)}
+          onDrop={(e) => { e.preventDefault(); setDropping(false); uploadFiles(e.dataTransfer.files) }}
+          onClick={(e) => { if (e.target === e.currentTarget) inputRef.current?.focus() }}
+        >
+          <textarea
+            ref={inputRef}
+            className="composer-input"
+            dir="auto"
+            rows={3}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input) } }}
+            placeholder={voice.state === 'recording' ? 'Listening… press stop when you\'re done'
+              : voice.state === 'transcribing' ? 'Transcribing…'
+              : 'Edit a step, ask a question, or give an instruction…'}
+            disabled={typing || !historyLoaded || voice.state !== 'idle'}
+            style={{ width: '100%', fontSize: 14, padding: '2px 0', maxHeight: 240 }}
+          />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 2, marginTop: 4 }}>
+            <input ref={pickerRef} type="file" multiple hidden onChange={(e) => { uploadFiles(e.target.files); e.target.value = '' }} />
+            <button type="button" className="composer-tool" title="Upload documents to Knowledge" aria-label="Upload documents"
+              onClick={() => pickerRef.current?.click()} disabled={upload.busy.length > 0}>
+              {upload.busy.length > 0 ? <Spinner size={15} /> : <Plus size={18} strokeWidth={1.9} />}
+            </button>
+            {voice.supported && (
+              <button
+                type="button"
+                className={`composer-tool${voice.state === 'recording' ? ' composer-tool--rec' : ''}`}
+                title={voice.state === 'recording' ? 'Stop and send' : 'Speak a command'}
+                aria-label={voice.state === 'recording' ? 'Stop recording' : 'Voice command'}
+                onClick={() => { voice.clearError(); voice.toggle() }}
+                disabled={typing || !historyLoaded || voice.state === 'transcribing'}
+              >
+                {voice.state === 'transcribing' ? <Spinner size={15} /> : voice.state === 'recording' ? <Square size={14} fill="currentColor" /> : <Mic size={17} strokeWidth={1.9} />}
+              </button>
+            )}
+            <span style={{ flex: 1 }} />
+            <button type="button" className="composer-send" aria-label="Send" title="Send (Enter)"
+              onClick={() => send(input)} disabled={!input.trim() || typing || voice.state !== 'idle'}>
+              {typing ? <Spinner size={15} /> : <ArrowUp size={17} strokeWidth={2.2} />}
+            </button>
+          </div>
+        </div>
       </div>
     </aside>
   )

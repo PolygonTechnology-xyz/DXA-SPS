@@ -39,15 +39,15 @@ function htmlToText(html: string): { title: string; text: string } {
   return { title, text: text.slice(0, 60_000) };
 }
 
-export async function handleWebPage(req: Request, url: URL): Promise<Response> {
-  if (req.method.toUpperCase() !== "GET") return json({ error: "not_found" }, 404);
+/** The readable text of a public web page (cached), or why it could not be read */
+export async function fetchPageText(address: string): Promise<{ data?: { url: string; title: string; text: string }; error?: string; status?: number }> {
   let target: URL;
-  try { target = new URL(url.searchParams.get("url") ?? ""); } catch { return json({ error: "bad_url" }, 400); }
-  if (!allowed(target)) return json({ error: "not_allowed" }, 400);
+  try { target = new URL(address); } catch { return { error: "bad_url", status: 400 }; }
+  if (!allowed(target)) return { error: "not_allowed", status: 400 };
 
   const key = target.href;
   const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < CACHE_MS) return json(hit.data);
+  if (hit && Date.now() - hit.at < CACHE_MS) return { data: hit.data };
 
   try {
     const res = await fetch(key, {
@@ -55,16 +55,22 @@ export async function handleWebPage(req: Request, url: URL): Promise<Response> {
       signal: AbortSignal.timeout(15_000),
       headers: { "User-Agent": "Mozilla/5.0 (SPS reference viewer)", "Accept": "text/html,application/xhtml+xml,text/plain" },
     });
-    if (!res.ok) return json({ error: `The website answered ${res.status}` }, 502);
+    if (!res.ok) return { error: `The website answered ${res.status}`, status: 502 };
     const type = res.headers.get("content-type") ?? "";
-    if (!/text\/html|xhtml|text\/plain/i.test(type)) return json({ error: "This link is not a web page (it may be a PDF or a file) — open it on the website." }, 415);
+    if (!/text\/html|xhtml|text\/plain/i.test(type)) return { error: "This link is not a web page (it may be a PDF or a file) — open it on the website.", status: 415 };
     const raw = await res.text();
     const page = /text\/plain/i.test(type) ? { title: "", text: raw.slice(0, 60_000) } : htmlToText(raw);
     const data = { url: res.url || key, ...page };
     cache.set(key, { at: Date.now(), data });
-    return json(data);
+    return { data };
   } catch (err) {
     log.error(`web-page ${key}: ${String(err)}`);
-    return json({ error: "The website could not be reached." }, 502);
+    return { error: "The website could not be reached.", status: 502 };
   }
+}
+
+export async function handleWebPage(req: Request, url: URL): Promise<Response> {
+  if (req.method.toUpperCase() !== "GET") return json({ error: "not_found" }, 404);
+  const r = await fetchPageText(url.searchParams.get("url") ?? "");
+  return r.data ? json(r.data) : json({ error: r.error }, r.status ?? 502);
 }

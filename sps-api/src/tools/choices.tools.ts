@@ -15,7 +15,7 @@ export const choicesToolDefinitions: Anthropic.Tool[] = [
       properties: {
         options: {
           type: "array",
-          items: { type: "string", description: "A short reply in the user's words, 1-5 words, in the user's language" },
+          items: { type: "string", description: "A short reply in the user's words, 1-5 words, in English" },
           minItems: 2,
           maxItems: 5,
         },

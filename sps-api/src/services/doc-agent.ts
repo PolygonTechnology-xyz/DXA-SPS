@@ -246,6 +246,10 @@ export async function runDocAgent(opts: {
   webSearchBudget: number;
   maxIterations?: number;
   maxTokens?: number;
+  /** more server tools, e.g. web_fetch limited to the accepted sites (with its beta) */
+  extraTools?: unknown[];
+  betas?: string[];
+  params?: Record<string, unknown>;
   emit: Emit;
   onText?: (t: string) => void;
 }): Promise<{ content: Anthropic.ContentBlock[]; all: Anthropic.ContentBlock[]; stop: string | null }> {
@@ -261,7 +265,7 @@ export async function runDocAgent(opts: {
       (tail.content as Anthropic.ContentBlockParam[]).push({ type: "text", text: "Research budget used up. Answer now with the JSON only, using what you have read." });
     }
     const webLeft = opts.webSearchBudget - webUsed;
-    const tools = last ? [] : [...DOC_TOOLS, ...(webLeft > 0 ? [{ ...opts.webSearch, max_uses: webLeft }] : [])];
+    const tools = last ? [] : [...DOC_TOOLS, ...(webLeft > 0 ? [{ ...opts.webSearch, max_uses: webLeft }] : []), ...(opts.extraTools ?? [])];
     markCache(messages);
 
     const result = await runStreamed({
@@ -271,6 +275,8 @@ export async function runDocAgent(opts: {
       messages,
       maxTokens: opts.maxTokens ?? 6000,
       tools,
+      betas: opts.betas,
+      params: opts.params,
       emit: opts.emit,
       onText: opts.onText,
     });

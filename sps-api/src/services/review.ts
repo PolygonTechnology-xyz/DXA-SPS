@@ -4,7 +4,7 @@ import { DocSession, runDocAgent } from "./doc-agent";
 import { runStreamed } from "./stream-call";
 import { memoryBlock } from "./memory";
 import { WEB_SEARCH } from "./web-tools";
-import { collectWebResults, validateWebSources, extractJsonObject, attachQuotes, finalizeCitations, QUOTE_RULE, type KnownSource } from "./sources";
+import { collectWebResults, validateWebSources, extractJsonObject, attachQuotes, finalizeCitations, QUOTE_RULE, ENGLISH_ONLY, type KnownSource } from "./sources";
 import {
   loadAsis, saveAsis, renumber, citedKinds, freezeCitations, nextFindingId, normalizeDigital, describeFinding,
   REVIEW_FIELDS, FIELD_LABEL, type Step, type Finding, type Review, type ReviewField,
@@ -30,13 +30,9 @@ export function projectCountry(projectId: string): string {
   return row?.country?.trim() || "Bangladesh";
 }
 
-/** "bn" when the user writes Bangla (latest chat message, else the project name/description) */
-export function userLanguage(projectId: string): "bn" | "en" {
-  const bangla = (t: string | undefined | null) => /[ঀ-৿]/.test(t ?? "");
-  const last = db.query("SELECT content FROM chat_messages WHERE project_id = ? AND role = 'user' ORDER BY id DESC LIMIT 1").get(projectId) as { content: string } | null;
-  if (last) return bangla(last.content) ? "bn" : "en";
-  const p = db.query("SELECT name, description FROM projects WHERE id = ?").get(projectId) as { name: string; description: string } | null;
-  return bangla(p?.name) || bangla(p?.description) ? "bn" : "en";
+/** The language of questions and cards — the app works in English only */
+export function userLanguage(_projectId: string): "bn" | "en" {
+  return "en";
 }
 
 const strip = (t: unknown) => String(t ?? "").replace(/\[[^\]]*\]/g, "").replace(/\s+([.,;])/g, "$1").replace(/\s{2,}/g, " ").trim();
@@ -45,6 +41,44 @@ const now = () => Math.floor(Date.now() / 1000);
 function saveChat(projectId: string, content: string, kind = "text", payload?: object) {
   db.query("INSERT INTO chat_messages (project_id, role, content, mode, pane, kind, payload) VALUES (?, 'assistant', ?, 'chat', 'asis', ?, ?)")
     .run(projectId, content, kind, payload ? JSON.stringify(payload) : null);
+}
+
+// The order the chat rail goes through the review: proposed steps first, then pain points,
+// law and digitalization — one topic at a time
+const TOPIC_ORDER = ["step", "pain_points", "legal_basis", "digital_status"] as const;
+const TOPIC_LABEL: Record<(typeof TOPIC_ORDER)[number], string> = {
+  step: "Steps found on the web", pain_points: "Pain points", legal_basis: "Law (Government Order / Regulation / Judgement)", digital_status: "Digitalization",
+};
+
+/**
+ * One chat-rail card for the review: every pending finding and open question, grouped by topic.
+ * The card shows one topic at a time and moves on when the user has answered it.
+ */
+export function postReviewSteps(
+  projectId: string,
+  asked: Array<{ field: ReviewField; step_number: number; question: string; found: string; refs: number[] }>,
+  sources: unknown[],
+): number {
+  const { steps, findings } = loadAsis(projectId);
+  const pending = findings.filter((f) => f.status === "pending");
+  const topics = TOPIC_ORDER.map((key) => ({
+    key,
+    finding_ids: pending.filter((f) => (key === "step" ? f.kind === "step" : f.kind === "field" && f.field === key)).map((f) => f.id),
+    questions: key === "step" ? [] : asked.filter((q) => q.field === key),
+  })).filter((t) => t.finding_ids.length || t.questions.length);
+  if (!topics.length) return 0;
+  // the text is what the assistant sees of the card in the history
+  const lines = topics.flatMap((t) => [
+    `${TOPIC_LABEL[t.key]}:`,
+    ...t.finding_ids.map((id) => {
+      const f = pending.find((x) => x.id === id)!;
+      return `- ${f.id} — ${describeFinding(f, steps)}: ${strip(f.kind === "step" ? f.step?.action : f.value)} (${f.origin === "unsourced" ? "no source — Yes / No / Skip" : "from the web — Use / Don't use"})`;
+    }),
+    ...t.questions.map((q) => `- Question, step ${q.step_number}: ${q.question}`),
+  ]);
+  saveChat(projectId, `I reviewed the AS-IS. Let's go through the open items one topic at a time — pain points, then law, then digitalization.\n${lines.join("\n")}`,
+    "review_steps", { topics, sources });
+  return pending.length;
 }
 
 /** Posts a consent card in the chat rail for every pending finding (none → nothing) */
@@ -110,6 +144,7 @@ Rules:
 - Keep a value already in the step when it is right; replace it only with a better-cited one. Leave the user's own values ("confirmed_by_user") as they are.
 - "sources": only web pages (W ids) you cite. [] if you did not search the web.
 - ${QUOTE_RULE}
+- ${ENGLISH_ONLY}
 - "questions": at most 8, most important first, only for values neither the documents nor the web gave; field = pain_points | digital_status | legal_basis; one short question each, written in ${lang === "bn" ? "Bangla" : "English"}. Each question row: [step_number, field, question, found] — found = 2-3 short sentences (max 50 words) on what you DID find that relates to the question, in the same language, cited [D1:4] / [W1]; "" when nothing related was found.
 - Be terse. No extra fields.`;
 }
@@ -283,28 +318,16 @@ export async function runReview(projectId: string, emit: Emit): Promise<{ steps:
   saveAsis(projectId, { steps, findings, review });
   log.analyze(`asis-review done  steps=${steps.length}  confirmed=${confirmed}  proposals=${newFindings.length}  questions=${questions.length}`);
 
-  // Chat rail: consent card for everything pending, then the open questions
-  const cards = postConsentCard(projectId);
-  if (questions.length) {
-    const bn = lang === "bn";
-    const intro = bn
-      ? "এই তথ্যগুলো আপনার ফাইলে বা ওয়েবে পুরোপুরি পাইনি। যা পেয়েছি তা নিচে দিলাম — জানা থাকলে উত্তর দিন (না জানলে \"জানি না\" লিখুন):"
-      : "I couldn't fully find these in your files or online. Here is what I found so far — if you know the answer, please reply (or say \"don't know\"):";
-    // what was found, with only real sources (pages read, web pages that came back), numbered [1], [2]…
-    const { items, sources } = finalizeCitations(foundText.map((found) => ({ found })), ["found"], known);
-    const list = questions.map((q, i) => {
-      const st = steps.find((s) => s.uid === q.step_uid);
-      const found = strip(items[i].found) || (bn ? "এ বিষয়ে ফাইলে বা ওয়েবে কিছু পাইনি।" : "Nothing about this in your files or online.");
-      const refs = items[i].sources.map((src) => `[${src.n}]`).join(" ");
-      return [
-        `**${i + 1}. Step ${st?.step_number} · ${FIELD_LABEL[q.field]}**`,
-        found,
-        ...(refs ? [`${bn ? "সূত্র" : "Sources"}: ${refs}`] : []),
-        `**${bn ? "প্রশ্ন" : "Question"}:** ${q.question}`,
-      ].join("\n");
-    });
-    saveChat(projectId, `${intro}\n\n${list.join("\n\n")}`, "text", sources.length ? { sources } : undefined);
-  }
+  // Chat rail: the open items one topic at a time — pain points, then law, then digitalization
+  const { items, sources } = finalizeCitations(foundText.map((found) => ({ found })), ["found"], known);
+  const asked = questions.map((q, i) => ({
+    field: q.field,
+    step_number: Number(steps.find((s) => s.uid === q.step_uid)?.step_number ?? 0),
+    question: q.question,
+    found: strip(items[i].found),
+    refs: items[i].sources.map((src) => src.n),
+  }));
+  const cards = postReviewSteps(projectId, asked, sources);
   emit({ type: "progress", text: `Review complete — ${confirmed} values from your documents${cards ? `, ${cards} to confirm in the chat` : ""}${questions.length ? `, ${questions.length} question${questions.length > 1 ? "s" : ""}` : ""}.` });
   emit({ type: "review_updated" });
   return { steps, findings, review };

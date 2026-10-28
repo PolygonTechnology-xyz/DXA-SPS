@@ -17,7 +17,7 @@ export const stepToolDefinitions: Anthropic.Tool[] = [
           type: "string",
           description:
             "AS-IS fields: step_name, actor (performer P), action, input, output, time_days (T, working days), pain_points, digital_status (manual | partly | online), digital_note (system name), legal_basis, step_type (activity | decision | document | message), visit (true when the citizen comes in person), fee (taka), no_goto (decision: step a No returns to), notes. " +
-            "TO-BE fields: step_name, actor, action, channel, time_days, citizen_touchpoints, simplification_rationale, legal_basis",
+            "TO-BE fields: step_name, actor, action, channel, time_days, citizen_touchpoints, simplification_rationale, legal_basis, digital_how (how a digital step is digitalized: system, automation, notifications), if_rejected (for a decision: who tells the applicant, how, what to fix, where the flow returns, appeal)",
         },
         value: { type: "string" },
         confirmed: { type: "boolean", description: "Set to true only after the user explicitly confirms clearing a legal_basis field." },
@@ -45,6 +45,8 @@ export const stepToolDefinitions: Anthropic.Tool[] = [
         citizen_touchpoints: { type: "number" },
         simplification_rationale: { type: "string" },
         legal_basis: { type: "string" },
+        digital_how: { type: "string", description: "TO-BE digital/hybrid step: how it is digitalized (system, automation, notifications)" },
+        if_rejected: { type: "string", description: "TO-BE decision: what happens on a No (who tells the applicant, how, what to fix, where the flow returns, appeal)" },
       },
       required: ["step_type", "step_name", "actor", "action"],
     },
@@ -99,6 +101,8 @@ export const stepToolDefinitions: Anthropic.Tool[] = [
         citizen_touchpoints: { type: "number" },
         simplification_rationale: { type: "string", description: "TO-BE: explain why merging simplifies the process" },
         legal_basis: { type: "string" },
+        digital_how: { type: "string", description: "TO-BE digital/hybrid step: how it is digitalized (system, automation, notifications)" },
+        if_rejected: { type: "string", description: "TO-BE decision: what happens on a No (who tells the applicant, how, what to fix, where the flow returns, appeal)" },
       },
       required: ["step_type", "step_numbers", "step_name", "actor", "action"],
     },
@@ -202,6 +206,8 @@ export function executeStepTool(
       citizen_touchpoints: fields.citizen_touchpoints as number | undefined,
       simplification_rationale: String(fields.simplification_rationale ?? ""),
       legal_basis: fields.legal_basis as string | undefined,
+      digital_how: fields.digital_how as string | undefined,
+      if_rejected: fields.if_rejected as string | undefined,
     }
     tobeSteps = [...tobeSteps, newStep]
       .sort((a, b) => a.step_number - b.step_number)
@@ -339,6 +345,8 @@ export function executeStepTool(
       citizen_touchpoints: fields.citizen_touchpoints as number | undefined,
       simplification_rationale: String(fields.simplification_rationale ?? ""),
       legal_basis: fields.legal_basis as string | undefined,
+      digital_how: fields.digital_how as string | undefined,
+      if_rejected: fields.if_rejected as string | undefined,
     }
     tobeSteps = [...tobeSteps.filter((s) => !nums.includes(s.step_number)), merged]
       .sort((a, b) => a.step_number - b.step_number)

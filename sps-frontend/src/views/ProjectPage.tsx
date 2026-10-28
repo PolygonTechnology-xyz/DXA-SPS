@@ -25,6 +25,7 @@ export default function ProjectPage({ projectId, pane }: Props) {
   // a consent card or review questions arrived — show the chat rail
   const chatOpenRequest = useNavigation((s) => s.chatOpenRequest)
   useEffect(() => { if (chatOpenRequest) setChatOpen(true) }, [chatOpenRequest])
+  const reviewWaiting = useNavigation((s) => (s.reviewWaiting?.projectId === projectId ? s.reviewWaiting : null))
   const wide = currentPane === 'overview' || currentPane === 'asis' || currentPane === 'tobe' || currentPane === 'files' || currentPane === 'outputs'
 
   return (
@@ -53,7 +54,8 @@ export default function ProjectPage({ projectId, pane }: Props) {
       {/* chat rail open button — floats at bottom-right so it's always findable */}
       {!chatOpen && !isRunning && (
         <button
-          onClick={() => setChatOpen(true)}
+          onClick={() => (reviewWaiting ? useNavigation.getState().focusReview() : setChatOpen(true))}
+          className={reviewWaiting ? 'rail-fab--waiting' : undefined}
           style={{
             position: 'absolute',
             right: 24,
@@ -75,6 +77,7 @@ export default function ProjectPage({ projectId, pane }: Props) {
           }}
         >
           <MessageSquare size={17} strokeWidth={1.9} /> Assistant
+          {reviewWaiting && <span className="rail-fab__badge" title={`${reviewWaiting.open} review question${reviewWaiting.open > 1 ? 's' : ''} waiting`}>{reviewWaiting.open}</span>}
         </button>
       )}
 

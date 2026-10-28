@@ -18,7 +18,7 @@ export const DIGITAL_VALUES = ["manual", "partly", "online"] as const;
 export const FIELD_LABEL: Record<ReviewField, string> = {
   pain_points: "Pain point",
   digital_status: "Digital status",
-  legal_basis: "Law / regulation",
+  legal_basis: "Law (Government Order / Regulation / Judgement)",
 };
 
 export interface Step extends Record<string, unknown> {

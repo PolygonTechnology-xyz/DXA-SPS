@@ -38,7 +38,7 @@ function byUser(step: AsIsStep, field: 'pain_points' | 'digital_status' | 'legal
   }
 }
 
-/** AS-IS columns: Step, Actor, Action, Input, Time, Pain Point, Digital, Law / regulation */
+/** AS-IS columns: Step, Actor, Action, Input, Time, Pain Point, Digital, Law (Government Order / Regulation / Judgement) */
 export function editAsisCell(step: AsIsStep, ci: number, value: string): AsIsStep {
   switch (ci) {
     case 1: return { ...step, actor: clean(value) }
@@ -61,15 +61,18 @@ function parseChannel(v: string, old: ToBeStep['channel']): ToBeStep['channel'] 
   return old
 }
 
-/** TO-BE columns: Step, Actor, Action, Channel, Time, Rationale, Legal basis */
+/** TO-BE columns: Step, Actor, Action, Channel, How it is digitalized, If rejected, Time, Rationale, Legal basis, World best practice */
 export function editTobeCell(step: ToBeStep, ci: number, value: string): ToBeStep {
   switch (ci) {
     case 1: return { ...step, actor: clean(value) }
     case 2: return { ...step, action: clean(value) }
     case 3: return { ...step, channel: parseChannel(value, step.channel) }
-    case 4: return { ...step, ...parseTime(value) }
-    case 5: return { ...step, simplification_rationale: clean(value) }
-    case 6: return { ...step, legal_basis: clean(value) }
+    case 4: return { ...step, digital_how: clean(value) }
+    case 5: return { ...step, if_rejected: clean(value) }
+    case 6: return { ...step, ...parseTime(value) }
+    case 7: return { ...step, simplification_rationale: clean(value) }
+    case 8: return { ...step, legal_basis: clean(value) }
+    case 9: return { ...step, best_practice: clean(value) }
     default: return step
   }
 }

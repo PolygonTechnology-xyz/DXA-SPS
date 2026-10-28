@@ -8,7 +8,7 @@ import type { CellMeta } from '@/components/viewer/TableViewer'
 export const FIELD_LABEL: Record<ReviewField, string> = {
   pain_points: 'Pain point',
   digital_status: 'Digital status',
-  legal_basis: 'Law / regulation',
+  legal_basis: 'Law (Government Order / Regulation / Judgement)',
 }
 
 export const DIGITAL_LABEL: Record<string, string> = {

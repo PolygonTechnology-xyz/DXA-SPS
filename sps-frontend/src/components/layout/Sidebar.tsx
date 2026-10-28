@@ -1,13 +1,36 @@
+import { useEffect, useState } from 'react'
 import { useNavigate, useParams, useMatch, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { projectsApi } from '@/api/projects'
+import { projectsApi, type Project } from '@/api/projects'
+import { ASIS_APPROVED } from '@/lib/progress'
 import { useNavigation } from '@/stores/navigation'
 import { useToBeStore } from '@/stores/tobe'
 import type { LucideIcon } from 'lucide-react'
-import { Workflow, PanelLeft, Plus, FolderOpen, Globe, ChevronLeft, LayoutGrid, Target, Folder, LogOut, PackageCheck, FileCheck2 } from 'lucide-react'
+import { Workflow, PanelLeft, Plus, FolderOpen, Globe, ChevronLeft, LayoutGrid, Target, BookOpen, LogOut, PackageCheck, FileCheck2, Lock } from 'lucide-react'
 import { IconButton } from '@/components/ui'
 
 type Pane = 'overview' | 'asis' | 'tobe' | 'files' | 'outputs'
+
+// The project's pages in working order: each opens once the one before it has been visited
+// (or the project's progress has already reached it)
+const PANE_ORDER: Pane[] = ['overview', 'files', 'asis', 'tobe', 'outputs']
+
+const visitedKey = (id: string) => `sps.visited.${id}`
+function readVisited(id: string): Pane[] {
+  try { return JSON.parse(localStorage.getItem(visitedKey(id)) ?? '[]') } catch { return [] }
+}
+
+/** Pages the progress has unlocked, whatever this browser remembers */
+function reachedByProgress(p: Project | undefined, hasVersions: boolean): Set<Pane> {
+  const reached = new Set<Pane>(['overview'])
+  if (!p) return reached
+  const asis = (p.asis_steps?.length ?? 0) > 0 || p.status !== 'draft'
+  const tobe = (p.tobe_steps?.length ?? 0) > 0 || ASIS_APPROVED.includes(p.status)
+  if (asis) ['files', 'asis'].forEach((x) => reached.add(x as Pane))
+  if (tobe) reached.add('tobe')
+  if (hasVersions || p.status === 'tobe_approved') reached.add('outputs')
+  return reached
+}
 
 interface NavItemProps {
   icon: LucideIcon
@@ -16,15 +39,18 @@ interface NavItemProps {
   collapsed: boolean
   onClick: () => void
   sub?: boolean
+  /** not reached yet: shown, but cannot be opened */
+  disabled?: boolean
 }
 
-function NavItem({ icon: Icon, label, active, collapsed, onClick, sub }: NavItemProps) {
+function NavItem({ icon: Icon, label, active, collapsed, onClick, sub, disabled }: NavItemProps) {
   return (
     <button
       onClick={onClick}
       className="ui-nav"
+      disabled={disabled}
       aria-current={active ? 'page' : undefined}
-      title={collapsed ? label : undefined}
+      title={disabled ? `${label} — open the step before it first` : collapsed ? label : undefined}
       style={{
         paddingLeft: collapsed ? 0 : sub ? 30 : 12,
         justifyContent: collapsed ? 'center' : 'flex-start',
@@ -33,7 +59,8 @@ function NavItem({ icon: Icon, label, active, collapsed, onClick, sub }: NavItem
       }}
     >
       <Icon size={17} strokeWidth={1.8} />
-      {!collapsed && <span>{label}</span>}
+      {!collapsed && <span style={{ flex: 1, textAlign: 'left' }}>{label}</span>}
+      {!collapsed && disabled && <Lock size={13} strokeWidth={1.9} style={{ color: 'var(--muted)' }} />}
     </button>
   )
 }
@@ -58,6 +85,33 @@ export default function Sidebar() {
   })
   const approvedTobe = versions.filter((v) => v.tobe_steps.length > 0)
   const shortDate = (ts: number) => new Date(ts * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+
+  const { data: project } = useQuery({
+    queryKey: ['project', id],
+    queryFn: () => projectsApi.get(id!),
+    enabled: inProject,
+  })
+
+  // remember the pages opened in this project (also when the chat or a button navigates)
+  const [visited, setVisited] = useState<Pane[]>([])
+  useEffect(() => {
+    if (!id) return
+    const seen = readVisited(id)
+    if (!seen.includes(currentPane)) {
+      seen.push(currentPane)
+      try { localStorage.setItem(visitedKey(id), JSON.stringify(seen)) } catch { /* private window */ }
+    }
+    setVisited(seen)
+  }, [id, currentPane])
+
+  const reached = reachedByProgress(project, versions.length > 0)
+  const isOpen = (p: Pane) => reached.has(p) || visited.includes(p) || p === currentPane
+  // a page opens once the page before it has been opened
+  const canOpen = (p: Pane) => {
+    const i = PANE_ORDER.indexOf(p)
+    return i <= 0 || isOpen(p) || isOpen(PANE_ORDER[i - 1])
+  }
+  const go = (p: Pane) => { if (canOpen(p)) navigate(`/projects/${id}/${p}`) }
 
   return (
     <aside
@@ -156,14 +210,23 @@ export default function Sidebar() {
               label="Overview"
               active={currentPane === 'overview'}
               collapsed={collapsed}
-              onClick={() => navigate(`/projects/${id}/overview`)}
+              onClick={() => go('overview')}
+            />
+            <NavItem
+              icon={BookOpen}
+              label="Knowledge"
+              active={currentPane === 'files'}
+              collapsed={collapsed}
+              disabled={!canOpen('files')}
+              onClick={() => go('files')}
             />
             <NavItem
               icon={Workflow}
               label="AS-IS process"
               active={currentPane === 'asis'}
               collapsed={collapsed}
-              onClick={() => navigate(`/projects/${id}/asis`)}
+              disabled={!canOpen('asis')}
+              onClick={() => go('asis')}
             />
             <div style={{ position: 'relative' }}>
               <NavItem
@@ -171,7 +234,8 @@ export default function Sidebar() {
                 label="TO-BE process"
                 active={currentPane === 'tobe'}
                 collapsed={collapsed}
-                onClick={() => navigate(`/projects/${id}/tobe`)}
+                disabled={!canOpen('tobe')}
+                onClick={() => go('tobe')}
               />
               {tobeRunning && currentPane !== 'tobe' && (
                 <span style={{
@@ -183,18 +247,12 @@ export default function Sidebar() {
               )}
             </div>
             <NavItem
-              icon={Folder}
-              label="Files & records"
-              active={currentPane === 'files'}
-              collapsed={collapsed}
-              onClick={() => navigate(`/projects/${id}/files`)}
-            />
-            <NavItem
               icon={PackageCheck}
               label="Outputs"
               active={currentPane === 'outputs' && !params.get('v')}
               collapsed={collapsed}
-              onClick={() => navigate(`/projects/${id}/outputs`)}
+              disabled={!canOpen('outputs')}
+              onClick={() => go('outputs')}
             />
             {!collapsed && approvedTobe.map((v) => (
               <NavItem

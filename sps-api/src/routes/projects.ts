@@ -24,8 +24,11 @@ export async function handleProjects(req: Request, url: URL): Promise<Response> 
     const id = `proj_${nanoid()}`;
     // a goal from the assistant's proposal counts as its suggestion until the user edits it
     db.query(
-      "INSERT INTO projects (id, name, description, goal, goal_by) VALUES (?, ?, ?, ?, ?)"
-    ).run(id, body.name ?? "Untitled Project", body.description ?? "", body.goal ?? "", body.goal ? "assistant" : null);
+      "INSERT INTO projects (id, name, description, goal, goal_by, country, ministry, department) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      id, body.name ?? "Untitled Project", body.description ?? "", body.goal ?? "", body.goal ? "assistant" : null,
+      body.country?.trim() || "Bangladesh", body.ministry?.trim() ?? "", body.department?.trim() ?? "",
+    );
     const row = db.query("SELECT * FROM projects WHERE id = ?").get(id);
     return json(parseProject(row as Row), 201);
   }
@@ -174,7 +177,7 @@ export async function handleProjects(req: Request, url: URL): Promise<Response> 
       }
       // SPS worksheets and settings (merged section by section)
       if (body.sps && typeof body.sps === "object") updateSps(id, body.sps as Partial<SpsData>);
-      const allowed = ["name", "description", "goal", "status", "asis_steps", "tobe_steps", "interview_data", "country"];
+      const allowed = ["name", "description", "goal", "status", "asis_steps", "tobe_steps", "interview_data", "country", "ministry", "department"];
       // the user editing the goal makes it theirs
       if (typeof body.goal === "string") { fields.push("goal_by = ?"); vals.push("user"); }
       for (const key of allowed) {

@@ -28,6 +28,8 @@ export interface ToBeStep {
   citizen_touchpoints?: number
   merged_from?: number[]
   simplification_rationale: string
+  digital_how?: string
+  if_rejected?: string
   legal_basis?: string
 }
 

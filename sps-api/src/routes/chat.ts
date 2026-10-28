@@ -150,7 +150,8 @@ export async function handleChat(req: Request, url: URL): Promise<Response> {
         // streamed: the reply appears word by word in the chat rail
         const stream = client.messages.stream({
           model: ANTHROPIC_MODEL,
-          max_tokens: 2048,
+          // room for a full explanation (tables, lists) — a cut-off reply looked unfinished
+          max_tokens: 8192,
           system,
           tools: cachedTools,
           messages,
@@ -290,7 +291,7 @@ Each user message starts with a <project_context> block holding the project's cu
 
 Project memory (like a team notebook — every later step reads it: AS-IS, review, TO-BE, future chats):
 - Read it first and follow it.
-- When the user decides, confirms or states a preference about this project or service (e.g. "the fee is paid online", "keep the police verification step", "answer in Bangla"), record it with update_memory — briefly, in the right section. Also record open questions you could not resolve.
+- When the user decides, confirms or states a preference about this project or service (e.g. "the fee is paid online", "keep the police verification step", "keep the fee step"), record it with update_memory — briefly, in the right section. Also record open questions you could not resolve.
 - Keep it short and current: replace notes that change, remove ones that are wrong or done, merge rather than append. Do not copy steps or documents into it.
 - Do not mention memory updates at length — a short "(noted)" is enough.
 
@@ -308,14 +309,15 @@ AS-IS review (pain point, digital status, law / regulation for every step):
 - OPEN QUESTIONS are values nobody found. When the user answers one, fill it with update_step (field pain_points, digital_status or legal_basis); when they say they don't know, call mark_unknown.
 - The user must decide every pending finding before the AS-IS can be approved; missing values only give a warning. Tell them what is left when they ask about approval or the TO-BE.
 
-Choices:
-- Whenever you ask the user to pick between a few answers (yes / no, use all / reject all / one by one, which of two options…), call offer_choices with those answers so they appear as buttons. Ask the question in one short sentence and do not list the options again as text.
+Asking questions:
+- Ask ONE question at a time, in one short sentence (max ~20 words). No preamble, no list of several questions — ask the next one after the user answers. A short lead-in like "Got it. Next question:" is fine.
+- Always call offer_choices with 2-4 likely answers (1-5 words each) so they appear as buttons — e.g. "No, nothing" / "SMS only" / "Yes, but unreliable". For yes/no questions: "Yes" / "No" / "Not sure". The user can still type their own answer. Do not repeat the options as text.
 
 Dropping AS-IS steps:
 - When the user asks to drop / remove / বাদ a step, first confirm it by number and name ("Drop step 6 'Exception loop'?"), unless they already named that exact step and clearly confirmed. Then call remove_step, and note the reason in project memory when they gave one.
 
 Language:
-- Reply in the user's language: Bangla when they write in Bangla, English when they write in English.
+- Always reply in English, also when the user writes in Bangla or Banglish — understand it, answer in English. Quick-reply options are in English too.
 
 Starting the AS-IS:
 - When the user says they have given all information / asks to start, run, generate or map the AS-IS, call generate_asis

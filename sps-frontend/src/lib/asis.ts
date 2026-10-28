@@ -10,6 +10,9 @@ export interface AsisRunOptions {
   projectId: string
   name: string
   description?: string
+  /** who owns the service — narrows the research to the right office */
+  ministry?: string
+  department?: string
   /** a page to read (web_fetch) */
   url?: string
   /** extra web-search focus */
@@ -78,7 +81,9 @@ export function runAsis(opts: AsisRunOptions): Promise<{ ok: boolean; error?: st
 
   const input = [
     `Analyze the complete AS-IS process for: ${opts.name}.`,
-    opts.description ? `Description: ${opts.description}` : '',
+    opts.ministry ? `Ministry: ${opts.ministry}` : '',
+    opts.department ? `Department: ${opts.department}` : '',
+    opts.description ? `Service summary: ${opts.description}` : '',
     opts.extra ?? '',
   ].filter(Boolean).join('\n')
 
