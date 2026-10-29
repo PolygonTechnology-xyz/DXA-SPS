@@ -104,10 +104,13 @@ export default function OverviewPane({ projectId }: Props) {
 
   return (
     <div>
-      {/* project details — as before, with the goal apart from the description */}
+      {/* project details — as before, the service summary, then the goal */}
       <div className="ui-card" style={{ padding: '20px 22px', marginBottom: 26 }}>
         <Field label="Project name">
           <Editable big ariaLabel="Project name" value={project.name} onSave={(v) => v && save({ name: v })} />
+        </Field>
+        <Field label="Service summary">
+          <Editable multiline ariaLabel="Service summary" value={project.description || ''} placeholder="What the service is, who applies, how it works today and the known problems" onSave={(v) => save({ description: v })} />
         </Field>
         <Field label="Goal" extra={project.goal && project.goal_by === 'assistant' && (
           <span className="ov-suggested" title="Written by the assistant from what you said — click the text to change it">
@@ -123,9 +126,6 @@ export default function OverviewPane({ projectId }: Props) {
                 {suggest.isError && <span style={{ fontSize: 12.5, color: 'var(--danger)' }}>No suggestion this time — please try again.</span>}
               </div>
             )}
-        </Field>
-        <Field label="Service summary">
-          <Editable multiline ariaLabel="Service summary" value={project.description || ''} placeholder="What the service is, who applies, how it works today and the known problems" onSave={(v) => save({ description: v })} />
         </Field>
         {/* the AS-IS review searches this country's laws and government services */}
         <Field label="Country">

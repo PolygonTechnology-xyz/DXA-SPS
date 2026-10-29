@@ -9,7 +9,7 @@ import {
   loadAsis, saveAsis, renumber, citedKinds, freezeCitations, nextFindingId, normalizeDigital, describeFinding,
   REVIEW_FIELDS, FIELD_LABEL, type Step, type Finding, type Review, type ReviewField,
 } from "./asis-state";
-import { ANTHROPIC_MODEL } from "../config";
+import { ASIS_MODEL } from "../config";
 import { SPS_GUIDE, SPS_PROFILE } from "./sps-guide";
 import { getSps, updateSps } from "./sps";
 import type { SpsDocument } from "./sps-calc";
@@ -44,10 +44,11 @@ function saveChat(projectId: string, content: string, kind = "text", payload?: o
 }
 
 // The order the chat rail goes through the review: proposed steps first, then pain points,
-// law and digitalization — one topic at a time
-const TOPIC_ORDER = ["step", "pain_points", "legal_basis", "digital_status"] as const;
+// law, the steps the law requires, and digitalization — one topic at a time
+const TOPIC_ORDER = ["step", "pain_points", "legal_basis", "law_required", "digital_status"] as const;
 const TOPIC_LABEL: Record<(typeof TOPIC_ORDER)[number], string> = {
-  step: "Steps found on the web", pain_points: "Pain points", legal_basis: "Law (Government Order / Regulation / Judgement)", digital_status: "Digitalization",
+  step: "Steps found on the web", pain_points: "Pain points", legal_basis: "Law (Government Order / Regulation / Judgement)",
+  law_required: "Steps required by law", digital_status: "Digitalization",
 };
 
 /**
@@ -63,8 +64,8 @@ export function postReviewSteps(
   const pending = findings.filter((f) => f.status === "pending");
   const topics = TOPIC_ORDER.map((key) => ({
     key,
-    finding_ids: pending.filter((f) => (key === "step" ? f.kind === "step" : f.kind === "field" && f.field === key)).map((f) => f.id),
-    questions: key === "step" ? [] : asked.filter((q) => q.field === key),
+    finding_ids: pending.filter((f) => (key === "step" ? f.kind === "step" : key === "law_required" ? f.kind === "law" : f.kind === "field" && f.field === key)).map((f) => f.id),
+    questions: key === "step" || key === "law_required" ? [] : asked.filter((q) => q.field === key),
   })).filter((t) => t.finding_ids.length || t.questions.length);
   if (!topics.length) return 0;
   // the text is what the assistant sees of the card in the history
@@ -72,11 +73,11 @@ export function postReviewSteps(
     `${TOPIC_LABEL[t.key]}:`,
     ...t.finding_ids.map((id) => {
       const f = pending.find((x) => x.id === id)!;
-      return `- ${f.id} — ${describeFinding(f, steps)}: ${strip(f.kind === "step" ? f.step?.action : f.value)} (${f.origin === "unsourced" ? "no source — Yes / No / Skip" : "from the web — Use / Don't use"})`;
+      return `- ${f.id} — ${describeFinding(f, steps)}: ${strip(f.kind === "step" ? f.step?.action : f.value)} (${f.kind === "law" ? "keep as a legal step — Yes / No" : f.origin === "unsourced" ? "no source — Yes / No / Skip" : "from the web — Use / Don't use"})`;
     }),
     ...t.questions.map((q) => `- Question, step ${q.step_number}: ${q.question}`),
   ]);
-  saveChat(projectId, `I reviewed the AS-IS. Let's go through the open items one topic at a time — pain points, then law, then digitalization.\n${lines.join("\n")}`,
+  saveChat(projectId, `I reviewed the AS-IS. Let's go through the open items one topic at a time — pain points, then law, the steps the law requires, then digitalization.\n${lines.join("\n")}`,
     "review_steps", { topics, sources });
   return pending.length;
 }
@@ -106,9 +107,19 @@ export function postConsentCard(projectId: string): number {
   return all.length;
 }
 
+// Where the shared law library answers "which rule governs / requires this step"
+const LAW_CHECKLIST = `GLOBAL KNOWLEDGE (the [K…] documents) holds the rules that apply to every service. For each step, look up what governs it:
+- money approved, sanctioned or paid → Delegation of Financial Powers order, General Financial Rules (who may sanction how much)
+- fee, charge or payment into or out of the treasury → Treasury Rules, Public Money and Budget Management Act
+- a file moving between desks or offices, approval levels, noting → Secretariat Instructions, Rules of Business
+- buying goods, works or services → Public Procurement Act / Rules
+- data or documents taken from another office, verification, consent → data management / personal data protection laws
+- complaints and appeals → GRS guideline; service standards and time limits → Citizen's Charter guideline, Service Simplification Guideline
+Plus the service's own Act / rules (uploaded documents or the web).`;
+
 function reviewSystem(country: string, hasDocs: boolean, lang: "bn" | "en"): string {
   const sources = hasDocs
-    ? `The user's uploaded documents are the primary source. You only know what is in them by looking:
+    ? `The uploaded documents and Global Knowledge are the primary sources. You only know what is in them by looking:
 - search_documents for each topic (pain points, complaints, delays, costs; portals, online systems, software; Acts, rules, orders, circulars, sections) — in English and in the local language.
 - read_pages for the pages your searches point to (up to 5 per call). Documents marked NOT searchable must be read directly. Call independent tools together.
 Then use web_search (when offered — at most 5, run them at once, each covering several steps) for what the documents do not say, on official ${country} sources: the national laws portal, gazettes, the ministry and the service portal.`
@@ -121,26 +132,29 @@ For EVERY step find:
 - PAIN point: the main problem for citizens or staff (delay, extra visit, cost, duplicate work), max 10 words.
 - DIGITAL status: "manual" (paper or in person), "partly" (some parts online), or "online" (fully digital end to end), plus the system or portal name when one exists.
 - LAW / regulation: the Act, rule, order or circular (with section) that requires or governs the step, max 10 words. Empty when none is found.
+- REQUIRED BY LAW: when a rule makes this step mandatory (the step itself must exist — e.g. a sanction by a named authority, a treasury deposit, a statutory verification or hearing), say which rule and what it requires, max 20 words, cited. "" when the law only governs how it is done, or when you found no such rule. Never guess — only a rule you read.
 - Where the step does not have them yet: TIME (working days), VISIT (1 if the citizen must come in person) and FEE (taka).
 For the whole service also fill:
 - SERVICE PROFILE (Sheet-1): ${SPS_PROFILE.map((p) => `${p.key} (${p.options.join("/")})`).join("; ")}.
 - DOCUMENTS (Sheet-3): every paper the citizen must submit — whether the citizen already has it ("citizen_own") or must get it from another office ("other_office"), and how the office checks it ("none", "own" records, or "other_office").
 
 ${sources}
+
+${LAW_CHECKLIST}
 Never guess. When neither the documents nor the web say it, leave the value empty and ask a question about it.
 
 Answer with ONLY this JSON object — no text before or after it, no markdown:
 {"sources":[{"id":"W1","title":"short page title","url":"https://exact-url-from-search"}],
- "review":[[1,"Two office visits needed [D1:3]","partly","sss.bkkb.gov.bd","[D1:2]","Welfare Fund Act 2004, s.12 [W1]",1,1,0]],
+ "review":[[1,"Two office visits needed [D1:3]","partly","sss.bkkb.gov.bd","[D1:2]","Welfare Fund Act 2004, s.12 [W1]",1,1,0,""],[6,"","manual","","","Delegation of Financial Powers 2026, item 4 [K1:7]",2,0,0,"Payment above the office head's limit must be sanctioned by the Director [K1:7]"]],
  "profile":{"file_method":"Hybrid","channel":"In person at office","fee_payment":"A-Challan","hotline":"None","tracking":"No"},
  "documents":[["National ID","citizen_own","other_office"],["Trade licence","other_office","other_office"]],
  "questions":[[9,"legal_basis","Which rule requires the five-level approval?","The Welfare Fund Act 2004 makes the Board the approving body [W1]. The circular lists the approval chain but names no rule for its five levels [D1:4]."]],
  "quotes":[["D1:3","Applicants must appear in person at the district office twice"],["W1","Section 12: the Board shall grant the stipend"]]}
-Each review row: [step_number, pain, digital_status, system_name, digital_evidence, law, time_days, visit, fee] — one row for EVERY step (time_days / visit / fee: null when unknown).
+Each review row: [step_number, pain, digital_status, system_name, digital_evidence, law, time_days, visit, fee, required_by_law] — one row for EVERY step (time_days / visit / fee: null when unknown).
 profile: only items you found evidence for, values from the listed options.
 
 Rules:
-- GUARDRAIL: cite every value with where it came from: [D1:4] = a document page you read or saw in search results, [W1] = a web page. A value without a citation is thrown away — if you have no source, leave it empty and ask a question. digital_evidence = the citation(s) behind the digital status.
+- GUARDRAIL: cite every value with where it came from: [D1:4] / [K1:4] = a document page you read or saw in search results, [W1] = a web page. A value without a citation is thrown away — if you have no source, leave it empty and ask a question. digital_evidence = the citation(s) behind the digital status.
 - Keep a value already in the step when it is right; replace it only with a better-cited one. Leave the user's own values ("confirmed_by_user") as they are.
 - "sources": only web pages (W ids) you cite. [] if you did not search the web.
 - ${QUOTE_RULE}
@@ -167,12 +181,13 @@ export async function runReview(projectId: string, emit: Emit): Promise<{ steps:
     ...(strip(s.pain_points) ? { pain: strip(s.pain_points) } : {}),
     ...(s.digital_status ? { digital: s.digital_status } : {}),
     ...(strip(s.legal_basis) ? { law: strip(s.legal_basis) } : {}),
+    ...(strip(s.law_required) ? { required_by_law: strip(s.law_required) } : {}),
     ...(Object.entries(s.field_sources ?? {}).some(([, v]) => v === "user")
       ? { confirmed_by_user: Object.entries(s.field_sources ?? {}).filter(([, v]) => v === "user").map(([k]) => k) } : {}),
   }));
-  const rejected = findings.filter((f) => f.status === "rejected" && f.kind === "field").map((f) => {
+  const rejected = findings.filter((f) => f.status === "rejected" && f.kind !== "step").map((f) => {
     const st = steps.find((s) => s.uid === f.step_uid);
-    return st ? `- step ${st.step_number} ${FIELD_LABEL[f.field!]}: ${strip(f.value)}` : "";
+    return st ? `- step ${st.step_number} ${f.kind === "law" ? "required by law" : FIELD_LABEL[f.field!]}: ${strip(f.value)}` : "";
   }).filter(Boolean);
   const prompt = [
     `Service: ${project.name}${project.description ? ` — ${project.description}` : ""}`,
@@ -186,8 +201,8 @@ export async function runReview(projectId: string, emit: Emit): Promise<{ steps:
   // the review rows as they are written — the AS-IS table fills its columns live
   const reviewText = (t: string) => emit({ type: "review_text", text: t });
   const result = session.docs.length
-    ? await runDocAgent({ label: "asis-review", model: ANTHROPIC_MODEL, system, prompt, session, webSearch: WEB_SEARCH, webSearchBudget: 5, maxIterations: 14, maxTokens: 16000, emit, onText: reviewText })
-    : await runStreamed({ label: "asis-review", model: ANTHROPIC_MODEL, system, messages: [{ role: "user", content: prompt }], maxTokens: 16000, tools: [{ ...WEB_SEARCH, max_uses: 5 }], emit, onText: reviewText })
+    ? await runDocAgent({ label: "asis-review", model: ASIS_MODEL, system, prompt, session, webSearch: WEB_SEARCH, webSearchBudget: 5, maxIterations: 14, maxTokens: 16000, emit, onText: reviewText })
+    : await runStreamed({ label: "asis-review", model: ASIS_MODEL, system, messages: [{ role: "user", content: prompt }], maxTokens: 16000, tools: [{ ...WEB_SEARCH, max_uses: 5 }], emit, onText: reviewText })
         .then((r) => ({ ...r, all: r.content }));
 
   const raw = extractJsonObject(result.content) as { sources?: Array<{ id?: string; url?: string; title?: string }>; review?: unknown[]; questions?: unknown[]; quotes?: unknown } | null;
@@ -209,12 +224,15 @@ export async function runReview(projectId: string, emit: Emit): Promise<{ steps:
 
   // values the AI gave without any source (left out; asked as questions below)
   const unsourced: Array<{ step: Step; field: ReviewField; raw: string; note?: string }> = [];
+  // "this step is required by <rule>": always put to the user (the TO-BE then keeps the step)
+  const lawRows: Array<{ step: Step; text: string }> = [];
   for (const row of raw.review) {
     if (!Array.isArray(row)) continue;
-    const [n, pain, digital, system_name, evidence, law, days, visit, fee] = row as unknown[];
+    const [n, pain, digital, system_name, evidence, law, days, visit, fee, required] = row as unknown[];
     const step = byNumber.get(Number(n));
     if (!step) continue;
     step.reviewed = true;
+    if (strip(required)) lawRows.push({ step, text: String(required).trim() });
     // time / visit / fee only where the mapping left them empty
     if ((step.time_days === undefined || step.time_days === null) && days != null && Number.isFinite(Number(days))) step.time_days = Number(days);
     if (step.visit === undefined && visit != null) step.visit = Number(visit) === 1 || visit === true;
@@ -259,6 +277,19 @@ export async function runReview(projectId: string, emit: Emit): Promise<{ steps:
         sources: frozen.sources, origin: "web", status: "pending", created_at: now(),
       });
     }
+  }
+
+  // A step the law requires is asked about even when a document backs it: the user's Yes is
+  // what locks it into the TO-BE. Uncited claims are dropped; one the user said No to is not asked again.
+  for (const { step, text } of lawRows) {
+    if (strip(step.law_required)) continue;
+    if (!citedKinds(text, known).size) continue;
+    if (findings.some((f) => f.kind === "law" && f.step_uid === step.uid && (f.status === "pending" || f.status === "rejected"))) continue;
+    const frozen = freezeCitations([text], known, findingNo);
+    newFindings.push({
+      id: `F${findingNo++}`, kind: "law", step_uid: step.uid, value: frozen.texts[0],
+      sources: frozen.sources, origin: citedKinds(text, known).has("doc") ? "ai" : "web", status: "pending", created_at: now(),
+    });
   }
 
   steps = renumber(steps, known);
@@ -316,7 +347,7 @@ export async function runReview(projectId: string, emit: Emit): Promise<{ steps:
   if (unsourced.length) log.analyze(`asis-review guardrail: ${unsourced.length} value(s) without a source — ${confirmCount} put to the user to confirm`);
   const review: Review = { reviewed_at: now(), country, questions };
   saveAsis(projectId, { steps, findings, review });
-  log.analyze(`asis-review done  steps=${steps.length}  confirmed=${confirmed}  proposals=${newFindings.length}  questions=${questions.length}`);
+  log.analyze(`asis-review done  steps=${steps.length}  confirmed=${confirmed}  proposals=${newFindings.length}  required-by-law=${newFindings.filter((f) => f.kind === "law").length}  questions=${questions.length}`);
 
   // Chat rail: the open items one topic at a time — pain points, then law, then digitalization
   const { items, sources } = finalizeCitations(foundText.map((found) => ({ found })), ["found"], known);

@@ -30,6 +30,8 @@ export interface Step extends Record<string, unknown> {
   digital_status?: string;           // manual | partly | online
   digital_note?: string;             // system name + citations, e.g. "sss.bkkb.gov.bd [D1:2]"
   legal_basis?: string;
+  /** the rule that requires this step to exist (with citations), confirmed by the user — the TO-BE keeps the step */
+  law_required?: string;
   field_sources?: Partial<Record<ReviewField, FieldSource>>;
   unknown_fields?: ReviewField[];    // the user said it is not known
   step_source?: FieldSource;         // set when a whole step came from a finding
@@ -45,8 +47,9 @@ export interface Step extends Record<string, unknown> {
 
 export interface Finding {
   id: string;                        // F1, F2… (short, so the user and the agent can refer to them)
-  kind: "field" | "step";
-  step_uid?: string;                 // field: the step it belongs to
+  /** field: a review value · step: a step found on the web · law: "this step is required by <rule>" */
+  kind: "field" | "step" | "law";
+  step_uid?: string;                 // field / law: the step it belongs to
   field?: ReviewField;
   value?: string;                    // field value, with citation ids ([W1]…)
   digital_note?: string;             // digital_status findings: system name + citations
@@ -68,7 +71,7 @@ export interface Review {
 }
 
 // Text fields of a step that may hold citation markers
-export const CITED_FIELDS = ["action", "input", "pain_points", "digital_note", "legal_basis"];
+export const CITED_FIELDS = ["action", "input", "pain_points", "digital_note", "legal_basis", "law_required"];
 
 export function ensureUids(steps: Step[]): Step[] {
   return steps.map((s) => (s.uid ? s : { ...s, uid: nanoid().slice(0, 10) }));
@@ -216,7 +219,7 @@ export interface Decision { id: string; decision: "accept" | "reject" | "skip"; 
 /** Pending findings whose step no longer exists (dropped by the user) are closed */
 export function syncFindings(steps: Step[], findings: Finding[]): Finding[] {
   const uids = new Set(steps.map((s) => s.uid));
-  return findings.map((f) => (f.status === "pending" && f.kind === "field" && f.step_uid && !uids.has(f.step_uid)
+  return findings.map((f) => (f.status === "pending" && f.kind !== "step" && f.step_uid && !uids.has(f.step_uid)
     ? { ...f, status: "dropped" as const, decided_at: Math.floor(Date.now() / 1000) }
     : f));
 }
@@ -227,7 +230,7 @@ export function describeFinding(f: Finding, steps: Step[]): string {
     return `New step${after ? ` after step ${after.step_number}` : " at the start"}: ${f.step?.step_name ?? ""}`;
   }
   const step = steps.find((s) => s.uid === f.step_uid);
-  return `Step ${step?.step_number ?? "?"} · ${FIELD_LABEL[f.field!]}`;
+  return `Step ${step?.step_number ?? "?"} · ${f.kind === "law" ? "Required by law" : FIELD_LABEL[f.field!]}`;
 }
 
 /** Applies the user's decisions; returns the new steps/findings and a summary line per decision */
@@ -264,7 +267,12 @@ export function applyDecisions(projectId: string, decisions: Decision[], via: "b
     const edited = typeof d.value === "string" && d.value.trim() ? d.value.trim() : undefined;
     for (const s of f.sources) extraKnown.set(s.id, { title: s.title, url: s.url, kind: s.kind, ...(s.quotes?.length ? { quotes: s.quotes } : {}) });
 
-    if (f.kind === "field") {
+    if (f.kind === "law") {
+      // the step stays in the TO-BE (digitalized, never removed)
+      const idx = steps.findIndex((s) => s.uid === f.step_uid);
+      if (idx === -1) { f.status = "dropped"; f.decided_at = now; results.push(`${f.id}: its step was removed`); continue; }
+      steps[idx] = { ...steps[idx], law_required: edited ?? f.value };
+    } else if (f.kind === "field") {
       const idx = steps.findIndex((s) => s.uid === f.step_uid);
       if (idx === -1) { f.status = "dropped"; f.decided_at = now; results.push(`${f.id}: its step was removed`); continue; }
       const step = { ...steps[idx] };

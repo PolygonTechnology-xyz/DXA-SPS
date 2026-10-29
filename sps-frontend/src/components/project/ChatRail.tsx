@@ -13,6 +13,7 @@ import MemoryPanel from '@/components/project/MemoryPanel'
 import ConsentCard from '@/components/project/ConsentCard'
 import ReviewSteps from '@/components/project/ReviewSteps'
 import { Button, IconButton, Spinner } from '@/components/ui'
+import { UPLOAD_ACCEPT } from '@/lib/files'
 import { useVoiceRecorder } from '@/hooks/useVoiceRecorder'
 import { useVersions, nextVersion, refreshAfterVersionChange } from '@/components/project/Versions'
 
@@ -152,12 +153,18 @@ export default function ChatRail({ projectId, pane, onClose }: Props) {
     el.style.height = `${Math.min(Math.max(el.scrollHeight, 72), 240)}px`
   }, [input])
 
-  // "+": documents go straight into the project's Knowledge (read and indexed in the background)
+  // "+" or drop: the user confirms, then the documents go into the project's Knowledge (read and indexed in the background)
   const [upload, setUpload] = useState<{ busy: string[]; done: string[]; failed: string[] }>({ busy: [], done: [], failed: [] })
   const [dropping, setDropping] = useState(false)
-  async function uploadFiles(raw: FileList | null) {
+  const [pendingFiles, setPendingFiles] = useState<File[]>([])
+  function pickFiles(raw: FileList | null) {
     if (!raw?.length || upload.busy.length) return
-    const list = Array.from(raw)
+    setPendingFiles(Array.from(raw))
+    setUpload({ busy: [], done: [], failed: [] })
+  }
+  async function uploadFiles(list: File[]) {
+    setPendingFiles([])
+    if (!list.length) return
     setUpload({ busy: list.map((f) => f.name), done: [], failed: [] })
     const results = await Promise.allSettled(list.map((f) => projectsApi.uploadFile(projectId, f)))
     setUpload({
@@ -176,6 +183,7 @@ export default function ChatRail({ projectId, pane, onClose }: Props) {
     setUndoSnapshot(null)
     setConfirmClear(false)
     setLockPrompt(null)
+    setPendingFiles([])
   }, [projectId])
 
   useEffect(() => {
@@ -524,6 +532,24 @@ export default function ChatRail({ projectId, pane, onClose }: Props) {
 
       {/* Input */}
       <div style={{ padding: '12px 14px 14px', borderTop: '1px solid var(--line)', flexShrink: 0 }}>
+        {pendingFiles.length > 0 && (
+          <div style={{ fontSize: 13, marginBottom: 8, padding: '10px 12px', borderRadius: 12, background: 'var(--accent-soft)', border: '1px solid var(--line)' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginBottom: 8, color: 'var(--ink-2)' }}>
+              <FileText size={14} style={{ color: 'var(--accent)', flexShrink: 0, marginTop: 2 }} />
+              <span>
+                Add <strong>{pendingFiles.length === 1 ? pendingFiles[0].name : `these ${pendingFiles.length} files`}</strong> to this project's Knowledge base?
+                <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
+                  {pendingFiles.length > 1 && <>{pendingFiles.map((f) => f.name).join(', ')}<br /></>}
+                  The AI will read it when it maps the AS-IS and designs the TO-BE.
+                </span>
+              </span>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Button size="sm" onClick={() => uploadFiles(pendingFiles)}>Yes, add to Knowledge</Button>
+              <Button size="sm" variant="ghost" onClick={() => setPendingFiles([])}>No</Button>
+            </div>
+          </div>
+        )}
         {(voice.error || upload.busy.length > 0 || upload.done.length > 0 || upload.failed.length > 0) && (
           <div style={{ fontSize: 12.5, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
             {voice.error && <span style={{ color: 'var(--danger)' }}>{voice.error}</span>}
@@ -550,7 +576,7 @@ export default function ChatRail({ projectId, pane, onClose }: Props) {
           style={{ padding: '10px 10px 8px 14px', borderRadius: 16 }}
           onDragOver={(e) => { e.preventDefault(); setDropping(true) }}
           onDragLeave={() => setDropping(false)}
-          onDrop={(e) => { e.preventDefault(); setDropping(false); uploadFiles(e.dataTransfer.files) }}
+          onDrop={(e) => { e.preventDefault(); setDropping(false); pickFiles(e.dataTransfer.files) }}
           onClick={(e) => { if (e.target === e.currentTarget) inputRef.current?.focus() }}
         >
           <textarea
@@ -568,7 +594,7 @@ export default function ChatRail({ projectId, pane, onClose }: Props) {
             style={{ width: '100%', fontSize: 14, padding: '2px 0', maxHeight: 240 }}
           />
           <div style={{ display: 'flex', alignItems: 'center', gap: 2, marginTop: 4 }}>
-            <input ref={pickerRef} type="file" multiple hidden onChange={(e) => { uploadFiles(e.target.files); e.target.value = '' }} />
+            <input ref={pickerRef} type="file" multiple accept={UPLOAD_ACCEPT} hidden onChange={(e) => { pickFiles(e.target.files); e.target.value = '' }} />
             <button type="button" className="composer-tool" title="Upload documents to Knowledge" aria-label="Upload documents"
               onClick={() => pickerRef.current?.click()} disabled={upload.busy.length > 0}>
               {upload.busy.length > 0 ? <Spinner size={15} /> : <Plus size={18} strokeWidth={1.9} />}

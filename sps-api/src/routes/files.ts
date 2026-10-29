@@ -1,5 +1,5 @@
 import { unlinkSync } from "fs";
-import { join } from "path";
+import { join, extname } from "path";
 import { db } from "../db/index";
 import { json, cors } from "../utils/cors";
 import { nanoid } from "../utils/id";
@@ -88,12 +88,12 @@ export async function handleFiles(req: Request, url: URL): Promise<Response> {
       });
     }
 
-    // Opens in the browser — the PDF the AI read (an office file's converted PDF), so
-    // citation links like …/view#page=4 land on the cited page
+    // Opens in the browser — the copy the AI read (an office file's converted PDF, an image's
+    // JPEG), so citation links like …/view#page=4 land on the cited page
     if (method === "GET" && action === "view") {
       const filePath = (row.pdf_path as string | null) ?? (row.path as string);
       const file = Bun.file(filePath);
-      const name = row.pdf_path && row.pdf_path !== row.path ? `${String(row.name).replace(/\.[^.]+$/, "")}.pdf` : String(row.name);
+      const name = row.pdf_path && row.pdf_path !== row.path ? `${String(row.name).replace(/\.[^.]+$/, "")}${extname(String(row.pdf_path))}` : String(row.name);
       return new Response(file, {
         headers: cors(new Headers({
           "Content-Disposition": `inline; filename="${encodeURIComponent(name)}"`,

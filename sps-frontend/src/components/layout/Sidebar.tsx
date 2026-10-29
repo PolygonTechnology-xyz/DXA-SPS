@@ -6,7 +6,7 @@ import { ASIS_APPROVED } from '@/lib/progress'
 import { useNavigation } from '@/stores/navigation'
 import { useToBeStore } from '@/stores/tobe'
 import type { LucideIcon } from 'lucide-react'
-import { Workflow, PanelLeft, Plus, FolderOpen, Globe, ChevronLeft, LayoutGrid, Target, BookOpen, LogOut, PackageCheck, FileCheck2, Lock } from 'lucide-react'
+import { Workflow, PanelLeft, Plus, FolderOpen, Globe, ChevronLeft, LayoutGrid, Target, BookOpen, LogOut, PackageCheck, FileCheck2, Lock, BarChart3, Timer, QrCode } from 'lucide-react'
 import { IconButton } from '@/components/ui'
 
 type Pane = 'overview' | 'asis' | 'tobe' | 'files' | 'outputs'
@@ -38,21 +38,24 @@ interface NavItemProps {
   active: boolean
   collapsed: boolean
   onClick: () => void
-  sub?: boolean
+  /** indented under the item above it: true (one level) or how many levels */
+  sub?: boolean | number
   /** not reached yet: shown, but cannot be opened */
   disabled?: boolean
+  /** why it is locked (the tooltip) */
+  lockedNote?: string
 }
 
-function NavItem({ icon: Icon, label, active, collapsed, onClick, sub, disabled }: NavItemProps) {
+function NavItem({ icon: Icon, label, active, collapsed, onClick, sub, disabled, lockedNote = 'open the step before it first' }: NavItemProps) {
   return (
     <button
       onClick={onClick}
       className="ui-nav"
       disabled={disabled}
       aria-current={active ? 'page' : undefined}
-      title={disabled ? `${label} — open the step before it first` : collapsed ? label : undefined}
+      title={disabled ? `${label} — ${lockedNote}` : collapsed ? label : undefined}
       style={{
-        paddingLeft: collapsed ? 0 : sub ? 30 : 12,
+        paddingLeft: collapsed ? 0 : 12 + 18 * Number(sub ?? 0),
         justifyContent: collapsed ? 'center' : 'flex-start',
         fontWeight: active ? 600 : sub ? 400 : 500,
         color: active ? 'var(--accent)' : 'var(--ink)',
@@ -70,20 +73,19 @@ export default function Sidebar() {
   const tobeRunning = useToBeStore(s => s.stage === 'generating')
   const collapsed = sidebarCollapsed
   const navigate = useNavigate()
-  const { id, pane } = useParams<{ id?: string; pane?: string }>()
+  const { id, pane, vid, tab } = useParams<{ id?: string; pane?: string; vid?: string; tab?: string }>()
 
   const currentPane = (pane as Pane) ?? 'overview'
   const inProject = !!id
   const onKnowledge = !!useMatch('/knowledge')
   const [params] = useSearchParams()
 
-  // approved TO-BE versions, listed under Outputs for a direct jump
+  // approved versions (AS-IS on its own, or AS-IS and TO-BE), listed under Outputs for a direct jump
   const { data: versions = [] } = useQuery({
     queryKey: ['versions', id],
     queryFn: () => projectsApi.versions(id!),
     enabled: inProject,
   })
-  const approvedTobe = versions.filter((v) => v.tobe_steps.length > 0)
   const shortDate = (ts: number) => new Date(ts * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
 
   const { data: project } = useQuery({
@@ -249,22 +251,36 @@ export default function Sidebar() {
             <NavItem
               icon={PackageCheck}
               label="Outputs"
-              active={currentPane === 'outputs' && !params.get('v')}
+              active={currentPane === 'outputs' && !params.get('v') && !vid}
               collapsed={collapsed}
               disabled={!canOpen('outputs')}
               onClick={() => go('outputs')}
             />
-            {!collapsed && approvedTobe.map((v) => (
-              <NavItem
-                key={v.id}
-                sub
-                icon={FileCheck2}
-                label={`TO-BE v${v.version} · ${shortDate(v.approved_at)}`}
-                active={currentPane === 'outputs' && params.get('v') === String(v.id)}
-                collapsed={collapsed}
-                onClick={() => navigate(`/projects/${id}/outputs?v=${v.id}`)}
-              />
-            ))}
+            {!collapsed && versions.map((v) => {
+              const open = currentPane === 'outputs' && (params.get('v') ?? vid) === String(v.id)
+              const go = (t: string) => navigate(`/projects/${id}/outputs/${v.id}/${t}`)
+              // the TO-BE items wait for the version's TO-BE approval
+              const noTobe = v.tobe_steps.length === 0
+              return (
+                <div key={v.id}>
+                  <NavItem
+                    sub
+                    icon={FileCheck2}
+                    label={`Version ${v.version} · ${shortDate(v.approved_at)}`}
+                    active={open && !vid}
+                    collapsed={collapsed}
+                    onClick={() => navigate(`/projects/${id}/outputs?v=${v.id}`)}
+                  />
+                  {open && <>
+                    <NavItem sub={2} icon={Workflow} label="AS-IS Analysis" active={tab === 'asis'} collapsed={collapsed} onClick={() => go('asis')} />
+                    <NavItem sub={2} icon={Target} label="TO-BE Analysis" active={tab === 'tobe'} collapsed={collapsed} disabled={noTobe} lockedNote="approve this version's TO-BE first" onClick={() => go('tobe')} />
+                    <NavItem sub={2} icon={BarChart3} label="TO-BE Impact Analysis" active={tab === 'impact'} collapsed={collapsed} disabled={noTobe} lockedNote="approve this version's TO-BE first" onClick={() => go('impact')} />
+                    <NavItem sub={3} icon={Timer} label="TCV" active={tab === 'tcv'} collapsed={collapsed} disabled={noTobe} lockedNote="approve this version's TO-BE first" onClick={() => go('tcv')} />
+                    <NavItem sub={3} icon={QrCode} label="Digitalization Analysis" active={tab === 'digital'} collapsed={collapsed} disabled={noTobe} lockedNote="approve this version's TO-BE first" onClick={() => go('digital')} />
+                  </>}
+                </div>
+              )
+            })}
           </>
         )}
       </nav>

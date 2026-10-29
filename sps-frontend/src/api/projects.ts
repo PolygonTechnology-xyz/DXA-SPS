@@ -59,7 +59,8 @@ export type FieldSource = 'doc' | 'web' | 'user' | 'ai'
 /** A proposal found only on the web (or without a source) — used only after the user accepts it */
 export interface Finding {
   id: string
-  kind: 'field' | 'step'
+  /** field: a review value · step: a step found on the web · law: "this step is required by <rule>" */
+  kind: 'field' | 'step' | 'law'
   step_uid?: string
   field?: ReviewField
   value?: string
@@ -134,6 +135,8 @@ export interface AsIsStep {
   /** system / portal name (+ citations) */
   digital_note?: string
   legal_basis?: string
+  /** the rule that makes this step mandatory, confirmed by the user — the TO-BE keeps the step */
+  law_required?: string
   field_sources?: Partial<Record<ReviewField, FieldSource>>
   unknown_fields?: ReviewField[]
   step_source?: FieldSource
@@ -236,7 +239,22 @@ export interface ProcessVersion {
   tobe_steps: ToBeStep[]
   /** TCV analysis of this version (only when its TO-BE is approved) */
   tcvq?: TcvqComparison
+  /** Digitalization Analysis: the TO-BE's digital infrastructure and cost heads (drafted on request) */
+  digital_plan?: DigitalPlan | null
 }
+
+export type CostHead = 'software_development' | 'integration' | 'hosting' | 'maintenance' | 'licence' | 'hardware' | 'security' | 'sms_payment' | 'data_agreement' | 'training'
+export interface DigitalComponent {
+  name: string
+  kind: 'website' | 'portal_module' | 'mobile_app' | 'integration' | 'system' | 'hardware' | 'other'
+  /** existing: already have · upgrade: have, needs work · new: need to build */
+  status: 'existing' | 'upgrade' | 'new'
+  steps: number[]
+  purpose: string
+  build: string
+  cost_heads: CostHead[]
+}
+export interface DigitalPlan { components: DigitalComponent[]; drafted_at: number }
 
 export interface ProjectFile {
   id: string
@@ -272,6 +290,8 @@ export const projectsApi = {
     api.post<Project>('/api/projects', body),
   /** one short AI call: a goal for a project that has none */
   suggestGoal: (id: string) => api.post<Project>(`/api/projects/${id}/suggest-goal`),
+  /** one AI call: the digital infrastructure of an approved version's TO-BE, saved with the version */
+  digitalPlan: (id: string, versionId: number) => api.post<DigitalPlan>(`/api/projects/${id}/versions/${versionId}/digital-plan`),
   update: (id: string, patch: Partial<Pick<Project, 'name' | 'description' | 'goal' | 'status' | 'asis_steps' | 'tobe_steps' | 'interview_data' | 'memory' | 'country' | 'ministry' | 'department' | 'sps'>>) =>
     api.patch<Project>(`/api/projects/${id}`, patch),
   trash: (id: string) => api.delete<{ ok: boolean }>(`/api/projects/${id}`),

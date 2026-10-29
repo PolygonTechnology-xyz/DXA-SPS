@@ -11,7 +11,7 @@ import { ensureUids, renumber, toIdMarkers, freezeCitations, CITED_FIELDS, type 
 import { updateSps } from "../sps";
 import { collectWebResults, validateWebSources, finalizeCitations, extractJsonObject, attachQuotes, type KnownSource } from "../sources";
 import { syncActive, activeInfo } from "../versions";
-import { ANTHROPIC_MODEL } from "../../config";
+import { ASIS_MODEL } from "../../config";
 import { log } from "../../utils/log";
 import { asisSystem, asisAgentSystem } from "./prompts";
 import { rows, withLabel, normalizeSteps, ASIS_KEYS, LOCKED_ASIS } from "./steps";
@@ -172,7 +172,7 @@ function callDocAgent(ctx: AsisContext): Promise<ModelResult> {
   const { body, emit, session, country } = ctx;
   return runDocAgent({
     label: "asis",
-    model: ANTHROPIC_MODEL,
+    model: ASIS_MODEL,
     system: asisAgentSystem(country),
     prompt: `${body.input}\n\nCountry: ${country}\n\n${session!.catalogue()}${ctx.acceptedBlock}${memoryBlock(body.project_id)}`,
     session: session!,
@@ -201,7 +201,7 @@ async function callWeb(ctx: AsisContext, retryNote: string): Promise<ModelResult
   ].filter(Boolean).join("\n\n") + ctx.acceptedBlock + memoryBlock(body.project_id);
   const result = await runStreamed({
     label: "asis",
-    model: ANTHROPIC_MODEL,
+    model: ASIS_MODEL,
     system: asisSystem(country),
     messages: [{ role: "user", content: request }],
     maxTokens: 16000,          // 8000 cut long processes off mid-JSON

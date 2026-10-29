@@ -3,7 +3,8 @@ import { mkdirSync, rmSync, readdirSync, existsSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { pathToFileURL } from "url";
 import { db } from "../db/index";
-import { DATA_DIR } from "../config";
+import { DATA_DIR, ANTHROPIC_MODEL } from "../config";
+import { client } from "./ai";
 import { nanoid } from "../utils/id";
 import { log } from "../utils/log";
 
@@ -13,7 +14,9 @@ import { log } from "../utils/log";
 //   PDF            → its own pages
 //   Office files   → converted to PDF with LibreOffice (real pages, tables kept)
 //   Spreadsheets   → one page per sheet (or per ~3000 chars of a large sheet)
-//   Text / images  → ~3000-char sections / one page
+//   Text           → ~3000-char sections
+//   Images         → one page: the AI writes out what the picture shows (steps of a flowchart,
+//                    rows of a table, text of a form), so it is searchable like any page
 // Page text goes into file_pages and the full-text index. Pages whose text is missing
 // (scanned) or garbled (legacy Bangla fonts such as SutonnyMJ) are kept out of the index:
 // the agent reads those as page images instead.
@@ -26,6 +29,9 @@ const OFFICE_EXT = ["doc", "docx", "odt", "rtf", "ppt", "pptx", "odp"];
 const SHEET_EXT = ["xlsx", "xlsm", "xls", "ods"];
 const TEXT_EXT = ["txt", "md", "csv", "json", "html", "htm"];
 export const IMAGE_TYPES: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", gif: "image/gif" };
+/** Images the AI can't take as they are: re-saved as JPEG first (so are photos over MAX_IMAGE_BYTES) */
+const IMAGE_CONVERT_EXT = ["tif", "tiff", "bmp"];
+const MAX_IMAGE_BYTES = 4_500_000;
 
 const SECTION_CHARS = 3000;
 /** Files of the Global Knowledge library live under this project id */
@@ -135,6 +141,9 @@ async function officeText(path: string, ext: string): Promise<string[]> {
   return [];   // .doc / .ppt / .rtf: no text fallback
 }
 
+/** An ordinary word, number or abbreviation, with its punctuation */
+const WORD = /^[(["“‘]?([A-Za-z][a-z]+|[A-Z]+|[a-z]|\d[\d.,:/-]*|[A-Z][a-z]*\.)[)\]"”’.,;:!?%-]*$/;
+
 /** good = usable text; empty = (nearly) no text, e.g. a scan; garbled = legacy-font Bangla or broken encoding (PDFs only) */
 function pageQuality(text: string, fromPdf = false): Quality {
   const chars = text.replace(/\s/g, "");
@@ -146,6 +155,10 @@ function pageQuality(text: string, fromPdf = false): Quality {
   const bangla = count(/[ঀ-৿]/g);
   const legacy = count(/[¡-ÿŒœŠšŸƒˆ˜†‡…‰`~^|]/g);
   if (bangla < chars.length * 0.05 && legacy / chars.length > 0.04) return "garbled";
+  // Other legacy Bangla fonts come out as plain-looking Latin ("oKtrrqfi€;rcBtTTqfre"): real
+  // English is mostly ordinary words (≥ 0.6 on the law library), this is mostly not (≤ 0.45)
+  const latin = text.split(/\s+/).filter((t) => /[A-Za-z]/.test(t));
+  if (bangla < chars.length * 0.05 && latin.length >= 20 && latin.filter((t) => WORD.test(t)).length / latin.length < 0.45) return "garbled";
   return "good";
 }
 
@@ -191,6 +204,44 @@ for ws in wb.worksheets:
     out.append({"sheet": ws.title, "text": "\\n".join(rows)})
 print(json.dumps(out))
 `;
+
+// Turned upright (phone photos carry their rotation in EXIF), at most 2000 px, JPEG
+const IMAGE_SCRIPT = `
+import sys
+from PIL import Image, ImageOps
+im = ImageOps.exif_transpose(Image.open(sys.argv[1])).convert("RGB")
+im.thumbnail((2000, 2000))
+im.save(sys.argv[2], "JPEG", quality=85)
+`;
+
+const IMAGE_PROMPT = `This image was uploaded as a source for mapping a government service process. Write out everything it shows, in its own language (Bangla stays Bangla):
+- a flowchart or process diagram: every step in order, numbered, with who does it (office / person) and what is submitted or produced; each decision with its Yes and No paths; loops back
+- a table: every row, cells separated by " | ", header row first
+- a form, notice or letter: its text, top to bottom
+Write only the parts the image has — no headings for what is not there. Do not summarise and do not add anything that is not in the image. If part of it can't be read, write [unreadable]. Answer with the content only, no markdown.`;
+
+/** The image as the AI is sent it: the file itself, or a JPEG copy when its type or size needs one */
+async function imageForAi(file: FileRow, bytes: ArrayBuffer): Promise<string> {
+  const ext = extOf(file.name);
+  if (IMAGE_TYPES[ext] && bytes.byteLength <= MAX_IMAGE_BYTES) return file.path;
+  mkdirSync(join(DERIVED_DIR, file.id), { recursive: true });
+  const out = join(DERIVED_DIR, file.id, "image.jpg");
+  const r = await run(["python3", "-P", "-c", IMAGE_SCRIPT, file.path, out], 60_000);
+  if (r.code !== 0 || !existsSync(out)) throw new Error("could not open the image");
+  return out;
+}
+
+/** What the image shows, written out by the AI */
+async function imageText(path: string): Promise<string> {
+  const media = IMAGE_TYPES[extOf(path)] as "image/png" | "image/jpeg" | "image/webp" | "image/gif";
+  const data = Buffer.from(await Bun.file(path).arrayBuffer()).toString("base64");
+  const res = await client.messages.stream({
+    model: ANTHROPIC_MODEL,
+    max_tokens: 8000,
+    messages: [{ role: "user", content: [{ type: "image", source: { type: "base64", media_type: media, data } }, { type: "text", text: IMAGE_PROMPT }] }],
+  }).finalMessage();
+  return res.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("").trim();
+}
 
 async function sheetPages(path: string, fileId: string): Promise<Page[]> {
   let xlsx = path;
@@ -260,19 +311,28 @@ async function ingest(file: FileRow): Promise<void> {
     } else if (TEXT_EXT.includes(ext)) {
       kind = "text";
       pages = sections(new TextDecoder().decode(bytes)).map((text) => ({ text, quality: pageQuality(text) }));
-    } else if (IMAGE_TYPES[ext]) {
+    } else if (IMAGE_TYPES[ext] || IMAGE_CONVERT_EXT.includes(ext)) {
       kind = "image";
-      pages = [{ text: "", quality: "empty" }];
+      // pdf_path holds the copy the AI is sent (for an image it isn't a PDF)
+      pdfPath = await imageForAi(file, bytes);
+      setNote(file.id, "Reading the image…");
+      const text = await imageText(pdfPath).catch((err) => { log.error(`ingest  ${file.name}: image not read — ${String(err)}`); return ""; });
+      pages = [{ text, quality: pageQuality(text) }];
     } else {
       status = "unsupported";
-      note = "This file type can't be read — upload PDF, Word, Excel, PowerPoint, text or an image";
+      note = ext === "heic" || ext === "heif"
+        ? "iPhone photo (HEIC) can't be read — save it as JPG and upload again"
+        : "This file type can't be read — upload PDF, Word, Excel, PowerPoint, text or an image";
     }
 
     if (kind) {
       const good = pages.filter((p) => p.quality === "good").length;
       const unit = kind === "pdf" ? "page" : "section";
       const n = `${pages.length} ${unit}${pages.length === 1 ? "" : "s"}`;
-      if (kind === "image") { status = "visual"; note = "Image — the AI looks at it directly; keyword search can't see it"; }
+      if (kind === "image") {
+        if (good) note = "Image · read by the AI · searchable";
+        else { status = "visual"; note = "Image — its text couldn't be read now; the AI looks at it directly"; }
+      }
       else if (!pages.length) { status = "failed"; note = "No content found in this file"; }
       else if (good === pages.length) note = `${n} · searchable`;
       else if (kind === "pdf" && good === 0) { status = "visual"; note = `${n} · scanned or legacy-font text — the AI reads the page images; keyword search can't see it`; }

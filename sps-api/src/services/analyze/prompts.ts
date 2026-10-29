@@ -109,6 +109,7 @@ Rules:
 - Write every text in the LANGUAGE given at the top of the request — never switch language because the guideline uses Bangla terms.
 - "Digital" is not enough on its own: every digital or hybrid step says how in digital_how. Never say just "made digital" or "online system".
 - No dead ends: every decision has no_goto and if_rejected; a rejected applicant always knows what happens next.
+- STEPS REQUIRED BY LAW: an AS-IS step with "required_by_law" was confirmed by the user as mandatory under that rule. It MUST stay in the TO-BE — never removed, never merged away (merged_from of a TO-BE step must include it, and that step must still perform the legal act). Keep the legal act but change HOW it is done: digitalize it (online application or approval in e-Nothi / the portal, data pulled automatically, digital signature, SMS notice), fewer hands and less time — only as far as that rule allows. Map it as "kept" (or "merged" only into a step that still does the legal act) and cite the rule in legal_basis.
 - WITHIN CURRENT LAW ONLY: never propose a step, removal, merge or proposal that needs an Act, rule, order or regulation to be amended or newly issued. A step the law requires stays (simplified only as far as the law allows — e.g. done online, with fewer hands, faster). Use what the law already permits (e.g. delegation the rules allow, digital records the ICT/e-transaction laws accept). This applies to the problem proposals too.
 - Keep every field short — no extra fields.`;
 

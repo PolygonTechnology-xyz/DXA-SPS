@@ -17,9 +17,10 @@ function fromDotEnv(name: string): string | undefined {
 export const PORT = parseInt(process.env.PORT ?? "8787");
 export const ANTHROPIC_API_KEY = fromDotEnv("ANTHROPIC_API_KEY") ?? process.env.ANTHROPIC_API_KEY ?? "";
 export const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL ?? "claude-haiku-4-5-20251001";
-// The TO-BE (design + implementation plan), thinking adaptively — the main model for now;
-// set TOBE_MODEL=claude-opus-5-5 in .env to design with Opus
-export const TOBE_MODEL = process.env.TOBE_MODEL ?? ANTHROPIC_MODEL;
+// The AS-IS (mapping + review) and the TO-BE (design + implementation plan) use Opus;
+// set ASIS_MODEL / TOBE_MODEL in .env to use another model
+export const ASIS_MODEL = process.env.ASIS_MODEL ?? "claude-opus-5-5";
+export const TOBE_MODEL = process.env.TOBE_MODEL ?? "claude-opus-5-5";
 export const ANTHROPIC_MODEL_FAST = process.env.ANTHROPIC_MODEL_FAST ?? "claude-haiku-4-5-20251001";
 export const ANTHROPIC_WORKSPACE_ID = process.env.ANTHROPIC_WORKSPACE_ID;
 

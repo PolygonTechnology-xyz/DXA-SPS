@@ -9,6 +9,7 @@ import { updateSps, getSps } from "../services/sps";
 import { runChecks, checksBlocking, summariseFeedback, type SpsData } from "../services/sps-calc";
 import { SPS_FEEDBACK } from "../services/sps-guide";
 import { suggestGoal } from "../services/goal";
+import { draftDigitalPlan, ensureDigitalPlan } from "../services/digital-plan";
 import { applyDecisions, loadAsis, saveAsis, syncFindings, coverage, type Decision, type Step } from "../services/asis-state";
 
 export async function handleProjects(req: Request, url: URL): Promise<Response> {
@@ -59,7 +60,10 @@ export async function handleProjects(req: Request, url: URL): Promise<Response> 
   if (method === "GET" && versionsMatch) {
     const pid = versionsMatch[1];
     syncActive(pid);   // projects approved before versions existed get their work saved as a version
-    return json(listVersions(pid));
+    const list = listVersions(pid);
+    // versions from before the Digitalization Analysis (or whose TO-BE changed) get theirs drafted
+    for (const v of list) if (v.tobe_steps.length) ensureDigitalPlan(pid, v.id);
+    return json(list);
   }
 
   // "Suggest a goal": one short AI call for a project that has none (older projects)
@@ -72,6 +76,17 @@ export async function handleProjects(req: Request, url: URL): Promise<Response> 
       if (!goal) return json({ error: "no_goal" }, 502);
       db.query("UPDATE projects SET goal = ?, goal_by = 'assistant', updated_at = unixepoch() WHERE id = ?").run(goal, goalMatch[1]);
       return json(parseProject(db.query("SELECT * FROM projects WHERE id = ?").get(goalMatch[1]) as Row));
+    } catch (err) {
+      return json({ error: String(err) }, 502);
+    }
+  }
+
+  // Digitalization Analysis of an approved version's TO-BE: drafted (or redrafted) on request
+  const digitalMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/versions\/(\d+)\/digital-plan$/);
+  if (method === "POST" && digitalMatch) {
+    try {
+      const plan = await draftDigitalPlan(digitalMatch[1], Number(digitalMatch[2]));
+      return plan ? json(plan) : json({ error: "no_plan" }, 502);
     } catch (err) {
       return json({ error: String(err) }, 502);
     }
@@ -196,6 +211,8 @@ export async function handleProjects(req: Request, url: URL): Promise<Response> 
       // approvals become versions in Outputs: the AS-IS on its own, then the TO-BE added to it
       // approvals are saved in the open version (shown in Outputs from then on)
       if (body.status || "tobe_steps" in body || "asis_steps" in body) syncActive(id);
+      // an approved TO-BE edited since it was generated: its Digitalization Analysis is redrafted
+      if (body.status === "tobe_approved") { const v = activeInfo(id); if (v) ensureDigitalPlan(id, v.id); }
       // steps replaced (undo, edits): pending findings of steps that are gone are closed
       if (Array.isArray(body.asis_steps)) {
         const { findings } = loadAsis(id);

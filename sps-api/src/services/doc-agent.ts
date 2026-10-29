@@ -180,13 +180,16 @@ export class DocSession {
 
     if (d.kind === "image") {
       if (!withinBudget) return { text: "Page budget for this run is used up — answer with what you have.", isError: true, attachments: [] };
-      const bytes = new Uint8Array(await Bun.file(d.path).arrayBuffer());
+      // pdfPath: the copy made for the AI (JPEG) when the original's type or size needs one
+      const path = d.pdfPath ?? d.path;
+      const bytes = new Uint8Array(await Bun.file(path).arrayBuffer());
       this.attachedPages += 1;
       this.attachedBytes += bytes.length;
       mark();
-      const media = IMAGE_TYPES[extname(d.path).slice(1).toLowerCase()] as "image/png" | "image/jpeg" | "image/webp" | "image/gif";
+      const media = IMAGE_TYPES[extname(path).slice(1).toLowerCase()] as "image/png" | "image/jpeg" | "image/webp" | "image/gif";
+      const written = getPages(d.id, 1, 1).find((p) => p.quality === "good")?.text;
       return {
-        text: `${d.ref} "${d.name}" (image) attached below. Cite as [${d.ref}:1].`,
+        text: `${d.ref} "${d.name}" (image) attached below. Cite as [${d.ref}:1].${written ? `\n\nIts content as written out on upload (check it against the image):\n${written}` : ""}`,
         attachments: [{ type: "image", source: { type: "base64", media_type: media, data: Buffer.from(bytes).toString("base64") } }],
       };
     }

@@ -77,7 +77,12 @@ export default function AllProjects() {
       await Promise.allSettled(sentFiles.map((f) => projectsApi.uploadFile(project.id, f)))
       return project
     },
-    onSuccess: openProject,
+    // files given in the chat: open the Files tab, where they are listed
+    onSuccess: (project) => {
+      if (!sentFiles.length) return openProject(project)
+      qc.invalidateQueries({ queryKey: ['projects'] })
+      navigate(`/projects/${project.id}/files`)
+    },
     onError: () => {
       setStage('idle')
       setMessages((prev) => [...prev, { role: 'assistant', content: 'Sorry, the project could not be created. Please try again.' }])

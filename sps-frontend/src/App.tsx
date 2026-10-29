@@ -14,6 +14,8 @@ export default function App() {
       <Route path="/knowledge" element={<AppShell />} />
       <Route path="/projects/:id" element={<Navigate to="overview" replace />} />
       <Route path="/projects/:id/:pane" element={<AppShell />} />
+      {/* one analysis of an Outputs version: /projects/:id/outputs/:vid/asis */}
+      <Route path="/projects/:id/:pane/:vid/:tab" element={<AppShell />} />
       <Route path="*" element={<Navigate to="/projects" replace />} />
     </Routes>
   )

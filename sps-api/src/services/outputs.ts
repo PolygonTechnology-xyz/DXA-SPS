@@ -19,9 +19,11 @@ export interface Version {
   sps: SpsData;
   /** TCV analysis (ছক-৭) of this version's AS-IS vs TO-BE — computed, never stored */
   tcvq?: ReturnType<typeof compareTcvq>;
+  /** the digital infrastructure of its approved TO-BE: have / upgrade / build, with cost heads (drafted on request) */
+  digital_plan: unknown | null;
 }
 
-interface VersionRow { id: number; version: number; project_name: string; country: string; approved_at: number; asis_steps: string; tobe_steps: string; sps: string | null; status: string | null }
+interface VersionRow { id: number; version: number; project_name: string; country: string; approved_at: number; asis_steps: string; tobe_steps: string; sps: string | null; status: string | null; digital_plan: string | null }
 
 // Outputs shows approved work only: versions whose AS-IS is approved, and a version's TO-BE
 // only once that is approved too (drafts are on the AS-IS / TO-BE pages)
@@ -29,7 +31,8 @@ const APPROVED = "status IN ('asis_approved', 'tobe_complete', 'tobe_approved')"
 
 const parse = (r: VersionRow): Version => {
   const tobeApproved = r.status === "tobe_approved";
-  const v: Version = { ...r, asis_steps: JSON.parse(r.asis_steps), tobe_steps: tobeApproved ? JSON.parse(r.tobe_steps) : [], sps: r.sps ? JSON.parse(r.sps) : {} };
+  const v: Version = { ...r, asis_steps: JSON.parse(r.asis_steps), tobe_steps: tobeApproved ? JSON.parse(r.tobe_steps) : [], sps: r.sps ? JSON.parse(r.sps) : {},
+    digital_plan: tobeApproved && r.digital_plan ? JSON.parse(r.digital_plan) : null };
   // only an approved TO-BE has something to compare
   return v.tobe_steps.length ? { ...v, tcvq: compareTcvq(v.asis_steps, v.tobe_steps, v.sps) } : v;
 };

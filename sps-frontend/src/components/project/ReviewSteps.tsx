@@ -7,7 +7,7 @@ import { openReference } from '@/stores/reference'
 import { useNavigation } from '@/stores/navigation'
 import { describeFinding, findingText } from '@/lib/asisReview'
 
-export type TopicKey = 'step' | 'pain_points' | 'legal_basis' | 'digital_status'
+export type TopicKey = 'step' | 'pain_points' | 'legal_basis' | 'law_required' | 'digital_status'
 export interface ReviewTopic {
   key: TopicKey
   finding_ids: string[]
@@ -18,12 +18,14 @@ const TOPIC_LABEL: Record<TopicKey, string> = {
   step: 'Steps from the web',
   pain_points: 'Pain points',
   legal_basis: 'Law',
+  law_required: 'Required by law',
   digital_status: 'Digitalization',
 }
 const TOPIC_INTRO: Record<TopicKey, string> = {
   step: 'These steps were found on the web, not in your files. Should they be part of the AS-IS?',
   pain_points: 'First, the pain points — what goes wrong for citizens or staff at each step.',
   legal_basis: 'Next, the law — the Government Order, regulation or judgement behind each step.',
+  law_required: 'These steps exist because a law or rule requires them. Confirm, and the TO-BE will keep them — made digital and faster, never removed.',
   digital_status: 'Last, digitalization — how far each step is already online.',
 }
 
@@ -213,12 +215,13 @@ export default function ReviewSteps({ cardId, latest, createdAt, projectId, proj
               <ol className="rv-list">
                 {items.map((f) => {
                   const confirm = f.origin === 'unsourced'
+                  const law = f.kind === 'law'
                   return (
                     <li key={f.id} className={`rv-item${f.status === 'pending' ? ' rv-item--open' : ' rv-item--done'}`}>
                       <div className="rv-item__where">{describeFinding(f, steps)}</div>
                       <div className="rv-item__text">{findingText(f)}</div>
                       <div className="rv-item__src">
-                        {f.origin === 'web' && f.sources.length
+                        {(f.origin === 'web' || law) && f.sources.length
                           ? f.sources.map((s) => (
                             <a key={s.id} href={sourceHref(s)} target="_blank" rel="noreferrer" onClick={(e) => { if (s.kind === 'doc') { e.preventDefault(); openReference(s) } }}>
                               <Globe size={12} /> {s.title}
@@ -228,7 +231,10 @@ export default function ReviewSteps({ cardId, latest, createdAt, projectId, proj
                       </div>
                       <div className="rv-item__actions">
                         {f.status === 'pending' ? (
-                          confirm ? <>
+                          law ? <>
+                            <Button size="sm" variant="primary" icon={Check} disabled={!!deciding} onClick={() => decide([f.id], 'accept')}>Yes, keep it</Button>
+                            <Button size="sm" icon={X} disabled={!!deciding} onClick={() => decide([f.id], 'reject')}>No, not required</Button>
+                          </> : confirm ? <>
                             <Button size="sm" variant="primary" icon={Check} disabled={!!deciding} onClick={() => decide([f.id], 'accept')}>Yes</Button>
                             <Button size="sm" icon={X} disabled={!!deciding} onClick={() => decide([f.id], 'reject')}>No</Button>
                             <Button size="sm" variant="ghost" icon={SkipForward} disabled={!!deciding} onClick={() => decide([f.id], 'skip')}>Skip</Button>
@@ -238,7 +244,8 @@ export default function ReviewSteps({ cardId, latest, createdAt, projectId, proj
                           </>
                         ) : (
                           <span className={`rv-status${f.status === 'accepted' ? ' rv-status--ok' : ''}`}>
-                            {f.status === 'accepted' ? (confirm ? '✓ Confirmed by you' : '✓ Used') : f.status === 'rejected' ? (confirm ? '✕ Not correct — left empty' : '✕ Not used') : f.status === 'skipped' ? '» Skipped' : 'Step removed'}
+                            {law ? (f.status === 'accepted' ? '✓ Kept as a legal step' : f.status === 'rejected' ? '✕ Not required' : 'Step removed')
+                              : f.status === 'accepted' ? (confirm ? '✓ Confirmed by you' : '✓ Used') : f.status === 'rejected' ? (confirm ? '✕ Not correct — left empty' : '✕ Not used') : f.status === 'skipped' ? '» Skipped' : 'Step removed'}
                           </span>
                         )}
                         {deciding === f.id && <Spinner size={13} />}
@@ -262,7 +269,7 @@ export default function ReviewSteps({ cardId, latest, createdAt, projectId, proj
               {items.filter((f) => f.status === 'pending').length > 1 && (
                 <>
                   <Button size="sm" disabled={!!deciding} onClick={() => decide(items.filter((f) => f.status === 'pending').map((f) => f.id), 'accept')}>
-                    {items.every((f) => f.origin === 'unsourced') ? 'Yes to all' : 'Use all'}
+                    {items.every((f) => f.kind === 'law') ? 'Keep all' : items.every((f) => f.origin === 'unsourced') ? 'Yes to all' : 'Use all'}
                   </Button>
                   {deciding === 'all' && <Spinner size={13} />}
                 </>

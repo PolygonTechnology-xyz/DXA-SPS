@@ -74,7 +74,7 @@ export function describeFinding(f: Finding, steps: AsIsStep[]): string {
     return `New step${after ? ` after step ${after.step_number}` : ' at the start'}`
   }
   const step = steps.find((s) => s.uid === f.step_uid)
-  return `Step ${step?.step_number ?? '?'} · ${FIELD_LABEL[f.field!]}`
+  return `Step ${step?.step_number ?? '?'} · ${f.kind === 'law' ? 'Required by law' : FIELD_LABEL[f.field!]}`
 }
 
 export function findingText(f: Finding): string {

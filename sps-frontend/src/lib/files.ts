@@ -1,6 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
 import { projectsApi, type ProjectFile } from '@/api/projects'
 
+/** What the upload buttons offer: the types the server reads (photos and screenshots too) */
+export const UPLOAD_ACCEPT = '.pdf,.doc,.docx,.odt,.rtf,.ppt,.pptx,.odp,.xlsx,.xlsm,.xls,.ods,.txt,.md,.csv,.json,.html,.htm,.png,.jpg,.jpeg,.webp,.gif,.tif,.tiff,.bmp,image/*'
+
 /**
  * The project's files and whether they are all processed. While any file is still being
  * read (converted / indexed in the background) the list refreshes every 1.5 s, and the

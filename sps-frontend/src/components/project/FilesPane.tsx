@@ -2,7 +2,7 @@ import { useState, useRef } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { projectsApi, type ProjectFile } from '@/api/projects'
-import { useProjectFiles } from '@/lib/files'
+import { useProjectFiles, UPLOAD_ACCEPT } from '@/lib/files'
 import { FileText, FileSpreadsheet, Image, File as FileIcon, UploadCloud, Download, Trash2, ArrowRight, CircleCheck, Eye, TriangleAlert, RotateCw, Workflow } from 'lucide-react'
 import { Button, IconButton, PageHeader, Spinner } from '@/components/ui'
 import { useVersions, nextVersion, refreshAfterVersionChange } from '@/components/project/Versions'
@@ -97,9 +97,8 @@ export default function FilesPane({ projectId, library }: Props) {
           : undefined}
       />
 
-      {/* web sources and documents side by side, then the AS-IS button below both */}
+      {/* documents and web sources side by side, then the AS-IS button below both */}
       <div className={library ? undefined : 'kb-cols'}>
-        {!library && <WebSources projectId={projectId} />}
         <section className={library ? undefined : 'ui-card kb-docs kb-col'}>
           {!library && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
@@ -127,7 +126,7 @@ export default function FilesPane({ projectId, library }: Props) {
               transition: 'border-color .15s, background .15s',
             }}
           >
-            <input ref={inputRef} type="file" multiple hidden onChange={(e) => uploadFiles(e.target.files)} />
+            <input ref={inputRef} type="file" multiple accept={UPLOAD_ACCEPT} hidden onChange={(e) => uploadFiles(e.target.files)} />
             <span style={{ width: 42, height: 42, borderRadius: 10, background: 'var(--accent-soft)', color: 'var(--accent)', display: 'inline-grid', placeItems: 'center', marginBottom: 10 }}>
               <UploadCloud size={21} strokeWidth={1.8} />
             </span>
@@ -135,7 +134,7 @@ export default function FilesPane({ projectId, library }: Props) {
               Drop files here or <span style={{ color: 'var(--accent)' }}>click to upload</span>
             </p>
             <p style={{ margin: '4px 0 0', color: 'var(--muted)', fontSize: 12 }}>
-              PDF, Word, Excel, PowerPoint, text and images — scanned pages and Bangla are read too
+              PDF, Word, Excel, PowerPoint, text and images (photos, screenshots, flowcharts) — scanned pages and Bangla are read too
             </p>
           </div>
 
@@ -195,6 +194,7 @@ export default function FilesPane({ projectId, library }: Props) {
           )}
           </div>
         </section>
+        {!library && <WebSources projectId={projectId} />}
       </div>
 
       {/* Next step — only once every file is processed */}

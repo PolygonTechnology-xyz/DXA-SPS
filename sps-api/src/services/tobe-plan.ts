@@ -47,6 +47,7 @@ Check every step for:
 - the old process simply moved online (same approvals, same checks, same papers);
 - a time that is not realistic (e.g. "same day" for something that needs several offices or a committee);
 - anything that would need an Act, rule, order or regulation to be amended or newly issued (always "high" — the TO-BE must stay within current law), or that removes / bypasses a step the law cited in the AS-IS requires;
+- an AS-IS step marked "required_by_law" that no TO-BE step covers (merged_from), or whose legal act the TO-BE step no longer performs (always "high");
 - the citizen still asked for data another office already holds;
 - a digital-only step with no assisted channel (digital centre / help desk) for citizens without digital skills.
 
@@ -63,7 +64,7 @@ ${catalogueBlock()}
 Answer with ONLY this JSON, one row per TO-BE step, no other text:
 {"steps":[[1,"","","<digital_how>","<if_rejected>",2,"<prerequisites>","<legal_fit>",1,"<owner>","quick","<fallback>"]],"fixed":["I1","I3"]}
 Row: [step_number, action, channel, digital_how, if_rejected, time_days, prerequisites, legal_fit, within_law, owner, effort, fallback].
-- action / channel: "" to keep them; otherwise the revised action ("Label: one sentence", max 18 words) / channel (digital|in_person|hybrid) — only to bring a step within current law or fix a reviewer's issue.
+- action / channel: "" to keep them; otherwise the revised action ("Label: one sentence", max 18 words) / channel (digital|in_person|hybrid) — only to bring a step within current law or fix a reviewer's issue. A step that covers an AS-IS step "required_by_law" must keep doing that legal act — digitalize how it is done, never drop it.
 - digital_how (max 35 words): for a digital/hybrid step, the concrete way it works — the named system from the list (or "new module on <portal>"), what is automated (auto-fill, verification, data pulled from which office), how the citizen is told (SMS, portal tracking). "" for an in-person step.
 - if_rejected (max 40 words): for a decision or any step that can refuse/return: who tells the applicant, how and with the reason; what they fix and by when; the step it returns to; appeal (to whom, within how many days; GRS). "" when the step cannot reject.
 - time_days: realistic working days for this step in the new way of working (number).

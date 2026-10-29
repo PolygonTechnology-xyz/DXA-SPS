@@ -12,6 +12,7 @@ import { getSps, updateSps, spsPromptBlock } from "../sps";
 import type { SpsDocument, SpsMapping, SpsProblem } from "../sps-calc";
 import { collectWebResults, validateWebSources, finalizeCitations, extractJsonObject, type KnownSource } from "../sources";
 import { refineTobe } from "../tobe-plan";
+import { ensureDigitalPlan } from "../digital-plan";
 import { activeInfo, syncActive } from "../versions";
 import { TOBE_MODEL } from "../../config";
 import { log } from "../../utils/log";
@@ -67,6 +68,9 @@ export async function generateTobe(projectId: string, emit: Emit): Promise<void>
   const finalized = finalizeCitations(refined, ["action", "simplification_rationale", "legal_basis", "digital_how", "if_rejected", "best_practice"], known);
   const tobe_steps = keepWebBestPractice(finalized.items);
 
+  // a step the law requires that the design dropped is flagged on the TO-BE step that follows it
+  flagDroppedLegalSteps(asis, tobe_steps as Array<Record<string, unknown>>);
+
   // 3. ছক-৫, ছক-৬ and the documents' TO-BE status
   const sheets = parseSheets(raw!, sps);
   updateSps(projectId, sheets);
@@ -76,6 +80,9 @@ export async function generateTobe(projectId: string, emit: Emit): Promise<void>
   db.query("UPDATE projects SET tobe_steps = ?, status = 'tobe_complete', updated_at = unixepoch() WHERE id = ?")
     .run(JSON.stringify(tobe_steps), projectId);
   syncActive(projectId);
+  // the Digitalization Analysis for Outputs, drafted in the background
+  const version = activeInfo(projectId);
+  if (version) ensureDigitalPlan(projectId, version.id);
   emit({ type: "done", text: JSON.stringify({ tobe_steps }), saved: true });
 }
 
@@ -92,6 +99,8 @@ function compactAsis(asis: Step[]): { compactSteps: CompactStep[]; known: Map<st
       ...(st.pain_points ? { pain: st.pain_points } : {}),
       ...(s.digital_status ? { digital: `${s.digital_status}${st.digital_note ? ` — ${st.digital_note}` : ""}` } : {}),
       ...(st.legal_basis ? { law: st.legal_basis } : {}),
+      // confirmed by the user: this step must stay (digitalized), never removed
+      ...(st.law_required ? { required_by_law: st.law_required } : {}),
     };
   });
   return { compactSteps, known };
@@ -138,6 +147,25 @@ async function designTobe(o: {
     maxTokens: 64000, emit, onText,
   });
   return { ...r, all: r.content };
+}
+
+/**
+ * AS-IS steps the user confirmed as required by law must live on in the TO-BE (merged_from).
+ * One that is missing gets a high check on the TO-BE step that now covers the step before it.
+ */
+function flagDroppedLegalSteps(asis: Step[], tobeSteps: Array<Record<string, unknown>>) {
+  if (!tobeSteps.length) return;
+  const from = (t: Record<string, unknown>) => (Array.isArray(t.merged_from) ? t.merged_from : String(t.merged_from ?? "").split(/[^\d]+/)).map(Number);
+  const covered = new Set(tobeSteps.flatMap(from));
+  for (const s of asis) {
+    if (!String(s.law_required ?? "").trim() || covered.has(Number(s.step_number))) continue;
+    const before = asis.filter((a) => a.step_number < s.step_number && covered.has(Number(a.step_number))).pop();
+    const at = (before && tobeSteps.find((t) => from(t).includes(Number(before.step_number)))) || tobeSteps[0];
+    const rule = String(s.law_required).replace(/\s*\[[^\]]*\]/g, "").trim();
+    const checks = (at.checks as Array<{ severity: string; issue: string }> | undefined) ?? [];
+    at.checks = [...checks, { severity: "high", issue: `AS-IS step ${s.step_number} (${s.step_name ?? "step"}) is required by law (${rule}) but was removed — keep it, digitalized.` }];
+    log.analyze(`tobe-generate: legally required AS-IS step ${s.step_number} was dropped — flagged`);
+  }
 }
 
 /** A best practice is shown only with the web page it was taken from */

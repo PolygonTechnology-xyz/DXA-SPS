@@ -47,7 +47,11 @@ export function editAsisCell(step: AsIsStep, ci: number, value: string): AsIsSte
     case 4: return { ...step, ...parseTime(value) }
     case 5: return { ...step, pain_points: clean(value), ...byUser(step, 'pain_points') }
     case 6: return { ...step, ...parseDigital(value, step), ...byUser(step, 'digital_status') }
-    case 7: return { ...step, legal_basis: clean(value), ...byUser(step, 'legal_basis') }
+    // the cell shows "⚖ Required by law — …" above the law; only the law is edited here
+    case 7: {
+      const law = value.startsWith('⚖') ? value.split('\n').slice(1).join('\n') : value
+      return { ...step, legal_basis: clean(law), ...byUser(step, 'legal_basis') }
+    }
     default: return step
   }
 }

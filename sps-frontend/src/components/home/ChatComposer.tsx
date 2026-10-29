@@ -3,6 +3,7 @@ import { Plus, Mic, Square, ArrowUp, FileText, X, ChevronDown, Check } from 'luc
 import { Spinner } from '@/components/ui'
 import type { ChatModel } from '@/api/analyze'
 import type { VoiceState } from '@/hooks/useVoiceRecorder'
+import { UPLOAD_ACCEPT } from '@/lib/files'
 
 const MAX_FILES = 10
 
@@ -110,7 +111,7 @@ export default function ChatComposer({ inputRef, value, onChange, onSubmit, plac
 
       {/* Toolbar under the box */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 2, marginTop: 6, padding: '0 2px', minHeight: 32 }}>
-        <input ref={pickerRef} type="file" multiple hidden onChange={(e) => { addFiles(e.target.files); e.target.value = '' }} />
+        <input ref={pickerRef} type="file" multiple accept={UPLOAD_ACCEPT} hidden onChange={(e) => { addFiles(e.target.files); e.target.value = '' }} />
         <button
           type="button" className="composer-tool" title="Attach files" aria-label="Attach files"
           onClick={() => pickerRef.current?.click()}

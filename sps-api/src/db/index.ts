@@ -156,6 +156,7 @@ for (const col of [
   "asis_docs_sig TEXT",
   "interview_data TEXT DEFAULT '{}'",
   "updated_at INTEGER",
+  "digital_plan TEXT",                 // the TO-BE's digital infrastructure and cost heads (Outputs; not part of the working area)
 ]) {
   try { db.exec(`ALTER TABLE tobe_versions ADD COLUMN ${col}`); } catch { /* already exists */ }
 }

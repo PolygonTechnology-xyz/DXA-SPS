@@ -183,7 +183,9 @@ export default function AsIsPane({ projectId }: Props) {
     // the guideline's step fields: type in the step badge; visit and fee next to the time
     const type = s.step_type && s.step_type !== 'activity' ? `${STEP_TYPE_LABEL[s.step_type]?.icon ?? ''} ` : ''
     const time = [s.time_days != null && String(s.time_days) !== '' ? `${s.time_days}d` : '', s.visit ? '🚶' : '', s.fee ? `৳${s.fee}` : ''].filter(Boolean).join(' · ') || '—'
-    return [`${type}${s.step_number}`, s.actor, s.action, s.input ?? '—', time, pain || blank, digital || blank, s.legal_basis || blank]
+    // a step the user confirmed the law requires: the TO-BE keeps it
+    const law = s.law_required ? `⚖ Required by law — ${s.law_required}${s.legal_basis ? `\n${s.legal_basis}` : ''}` : s.legal_basis
+    return [`${type}${s.step_number}`, s.actor, s.action, s.input ?? '—', time, pain || blank, digital || blank, law || blank]
   })
   const rows = toRows(steps, reviewed ? '' : '—')
   const cellMeta = (ri: number, ci: number) => {

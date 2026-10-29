@@ -70,7 +70,7 @@ export function TcvqBar({ project, onOpen }: { project: Project; onOpen: () => v
   )
 }
 
-// ── ছক-৭ TCVQ table ──────────────────────────────────────────────────────────
+// ── TCVQ table (the guideline's sheet 7) ──────────────────────────────────────────────────────────
 
 export function TcvqTable({ project, tcvq }: { project?: Project; tcvq?: Project['tcvq'] }) {
   // a project's current TO-BE, or an approved version's (Outputs)
@@ -81,24 +81,24 @@ export function TcvqTable({ project, tcvq }: { project?: Project; tcvq?: Project
     <tr><td style={td}>{label}</td><td style={td}>{a}</td><td style={td}>{b}</td><td style={{ ...td, fontWeight: 600, color: '#15803d' }}>{d}</td></tr>
   )
   return (
-    <Section title="TCVQ comparison · ছক-৭" sub={`Citizen cost per visit ${taka(c.per_visit)} (fare + food + lost wage — set on Overview)`}>
+    <Section title="TCVQ comparison" sub={`Citizen cost per visit ${taka(c.per_visit)} (fare + food + lost wage — set on Overview)`}>
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead><tr><th style={th}>Area · ক্ষেত্র</th><th style={th}>Existing · বিদ্যমান</th><th style={th}>Proposed · প্রস্তাবিত</th><th style={th}>Difference · পার্থক্য</th></tr></thead>
+          <thead><tr><th style={th}>Area</th><th style={th}>Existing</th><th style={th}>Proposed</th><th style={th}>Difference</th></tr></thead>
           <tbody>
-            {row('Time (working days) · সময়', c.asis.time_days, t?.time_days ?? '—', c.diff?.time_days ?? '—')}
-            {row('Visits · যাতায়াত', c.asis.visits, t?.visits ?? '—', c.diff?.visits ?? '—')}
-            {row('Citizen cost · নাগরিকের ব্যয়', taka(c.asis.citizen_cost), taka(t?.citizen_cost), taka(c.diff?.citizen_cost))}
-            {row('Documents · দাখিলিয় কাগজপত্র', c.asis.documents ?? '—', t?.documents ?? '—', c.diff?.documents ?? '—')}
-            {row('Office cost · দাপ্তরিক ব্যয়', taka(c.asis.office_cost), taka(t?.office_cost), taka(c.diff?.office_cost))}
-            {row('Steps · ধাপ', c.asis.steps, t?.steps ?? '—', c.diff?.steps ?? '—')}
-            {row('Staff · জনবল', c.asis.staff, t?.staff ?? '—', c.diff?.staff ?? '—')}
+            {row('Time (working days)', c.asis.time_days, t?.time_days ?? '—', c.diff?.time_days ?? '—')}
+            {row('Visits', c.asis.visits, t?.visits ?? '—', c.diff?.visits ?? '—')}
+            {row('Citizen cost', taka(c.asis.citizen_cost), taka(t?.citizen_cost), taka(c.diff?.citizen_cost))}
+            {row('Documents', c.asis.documents ?? '—', t?.documents ?? '—', c.diff?.documents ?? '—')}
+            {row('Office cost', taka(c.asis.office_cost), taka(t?.office_cost), taka(c.diff?.office_cost))}
+            {row('Steps', c.asis.steps, t?.steps ?? '—', c.diff?.steps ?? '—')}
+            {row('Staff', c.asis.staff, t?.staff ?? '—', c.diff?.staff ?? '—')}
           </tbody>
         </table>
       </div>
       {c.annual && (
         <div style={{ marginTop: 8, fontSize: 13 }}>
-          <strong>Annual saving · বার্ষিক সাশ্রয়</strong> for {c.annual.users.toLocaleString('en-IN')} users:{' '}
+          <strong>Annual saving</strong> for {c.annual.users.toLocaleString('en-IN')} users:{' '}
           <strong>{c.annual.days.toLocaleString('en-IN')}</strong> days · <strong>{c.annual.visits.toLocaleString('en-IN')}</strong> visits · <strong>{taka(c.annual.taka)}</strong>
         </div>
       )}
