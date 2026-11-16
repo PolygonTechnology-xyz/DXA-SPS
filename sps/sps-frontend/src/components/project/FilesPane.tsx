@@ -402,8 +402,11 @@ function StartAsisDialog({ projectId, onClose }: { projectId: string; onClose: (
     <div onClick={() => { if (!busy) onClose() }} onKeyDown={(e) => { if (e.key === 'Escape' && !busy) onClose() }}
       style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(17,24,39,.4)', display: 'grid', placeItems: 'center', padding: 16 }}>
       <div role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()} className="ui-card"
-        style={{ padding: 22, maxWidth: 440, width: '100%', boxShadow: '0 12px 40px rgba(16,24,40,.18)' }}>
-        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+        style={{ position: 'relative', padding: 22, maxWidth: 440, width: '100%', boxShadow: '0 12px 40px rgba(16,24,40,.18)' }}>
+        {/* close: nothing starts, the user stays on the Files page */}
+        <IconButton icon={X} label="Close" size="sm" disabled={busy} onClick={onClose}
+          style={{ position: 'absolute', top: 10, right: 10 }} />
+        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', paddingRight: 24 }}>
           <span style={{ width: 34, height: 34, borderRadius: 8, background: 'var(--accent-soft)', color: 'var(--accent)', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
             <Workflow size={17} strokeWidth={1.9} />
           </span>
@@ -428,10 +431,9 @@ function StartAsisDialog({ projectId, onClose }: { projectId: string; onClose: (
             {error && <p style={{ margin: '8px 0 0', fontSize: 13, color: 'var(--danger)' }}>{error}</p>}
           </div>
         </div>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18, flexWrap: 'wrap' }}>
-          <Button disabled={busy} onClick={() => { onClose(); navigate(`/projects/${projectId}/asis`) }}>No, just open the AS-IS</Button>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18 }}>
           <Button variant="primary" icon={Workflow} loading={busy} autoFocus onClick={start} disabled={!files.length && !accepted}>
-            {hasAsis && locked ? `Yes, create v${next.number}` : 'Yes, start'}
+            {hasAsis && locked ? `OK, create v${next.number} and start` : 'OK, start the AS-IS'}
           </Button>
         </div>
       </div>
