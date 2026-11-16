@@ -112,7 +112,7 @@ export function ActorChips({ value }: { value: string }) {
   return (
     <span style={{ display: 'flex', flexWrap: 'wrap', gap: 6, minWidth: 0 }}>
       {parts.map((p, i) => (
-        <span key={i} className="ui-chip"><i style={{ background: actorColor(p) }} />{p}</span>
+        <span key={i} className="ui-chip">{p}</span>
       ))}
     </span>
   )
