@@ -203,8 +203,9 @@ export async function handleProjects(req: Request, url: URL): Promise<Response> 
         const pending = coverage(steps, findings).pending;
         if (pending > 0) return json({ error: "pending_findings", pending }, 409);
       }
-      // Approving the TO-BE needs every SPS check that fails to be fixed (warnings only warn)
-      if (body.status === "tobe_approved") {
+      // Approving the TO-BE: a failing SPS check (time, visits, cost, steps not reduced…) is
+      // reported first; the user can still approve it anyway (override: true)
+      if (body.status === "tobe_approved" && body.override !== true) {
         const p = parseProject(row);
         const failed = checksBlocking(runChecks(p.asis_steps, p.tobe_steps, p.sps));
         if (failed.length) return json({ error: "sps_checks", failed: failed.map((c) => `${c.label}: ${c.detail}`) }, 409);

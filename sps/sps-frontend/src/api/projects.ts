@@ -306,7 +306,7 @@ export const projectsApi = {
   documents: (id: string, versionId: number) => api.get<VersionDocument[]>(`/api/projects/${id}/versions/${versionId}/documents`),
   documentUrl: (id: string, docId: number) => `/api/projects/${id}/documents/${docId}`,
   deleteDocument: (id: string, docId: number) => api.delete<{ ok: boolean }>(`/api/projects/${id}/documents/${docId}`),
-  update: (id: string, patch: Partial<Pick<Project, 'name' | 'description' | 'goal' | 'status' | 'asis_steps' | 'tobe_steps' | 'interview_data' | 'memory' | 'country' | 'ministry' | 'department' | 'sps'>>) =>
+  update: (id: string, patch: Partial<Pick<Project, 'name' | 'description' | 'goal' | 'status' | 'asis_steps' | 'tobe_steps' | 'interview_data' | 'memory' | 'country' | 'ministry' | 'department' | 'sps'>> & { override?: boolean }) =>
     api.patch<Project>(`/api/projects/${id}`, patch),
   trash: (id: string) => api.delete<{ ok: boolean }>(`/api/projects/${id}`),
   /** Chat rail history of this project (saved by the server as messages are sent) */

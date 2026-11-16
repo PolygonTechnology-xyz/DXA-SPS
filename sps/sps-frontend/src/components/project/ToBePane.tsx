@@ -73,6 +73,16 @@ export default function ToBePane({ projectId, pane }: Props) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['project', projectId] }),
   })
 
+  // Approve the TO-BE; a failing SPS check is shown first, and "Approve anyway" sends override
+  function approveTobe(override = false) {
+    setApproveError(null)
+    updateProject.mutate({ status: 'tobe_approved', ...(override ? { override: true } : {}) }, {
+      onSuccess: () => { qc.invalidateQueries({ queryKey: ['versions', projectId] }); qc.invalidateQueries({ queryKey: ['versions-all', projectId] })},
+      // the server refuses while an SPS check fails (unless approved anyway)
+      onError: (err) => setApproveError(parseFailed(err)),
+    })
+  }
+
   const tobeSteps: ToBeStep[] = project?.tobe_steps ?? []
   const asisSteps = project?.asis_steps ?? []
   // TO-BE is designed only from an approved AS-IS (every web finding decided)
@@ -446,14 +456,7 @@ export default function ToBePane({ projectId, pane }: Props) {
             // approved: the switcher already says so (v2 · Approved) — no button
             primary={tobeFrozen ? undefined :
               <Button size="sm" variant="success" icon={CircleCheck}
-                onClick={() => {
-                  setApproveError(null)
-                  updateProject.mutate({ status: 'tobe_approved' }, {
-                    onSuccess: () => { qc.invalidateQueries({ queryKey: ['versions', projectId] }); qc.invalidateQueries({ queryKey: ['versions-all', projectId] })},
-                    // the server refuses while an SPS check fails
-                    onError: (err) => setApproveError(parseFailed(err)),
-                  })
-                }}>
+                onClick={() => approveTobe()}>
                 Approve
               </Button>
             }
@@ -482,9 +485,14 @@ export default function ToBePane({ projectId, pane }: Props) {
           )}
 
           {approveError && (
-            <Notice tone="danger" action={<IconButton icon={X} label="Dismiss" size="sm" onClick={() => setApproveError(null)} />}>
+            <Notice tone="warn" action={
+              <span style={{ display: 'flex', gap: 6 }}>
+                <Button size="sm" variant="primary" disabled={updateProject.isPending} onClick={() => approveTobe(true)}>Approve anyway</Button>
+                <IconButton icon={X} label="Dismiss" size="sm" onClick={() => setApproveError(null)} />
+              </span>
+            }>
               <TriangleAlert size={16} style={{ flexShrink: 0 }} />
-              <span>Not approved — the TO-BE fails the guideline: {approveError.join(' · ')}. Fix it in the chat or regenerate.</span>
+              <span>The TO-BE does not meet the guideline: {approveError.join(' · ')}. Fix it in the chat or regenerate — or approve it anyway.</span>
             </Notice>
           )}
 
