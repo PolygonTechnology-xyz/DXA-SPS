@@ -99,11 +99,15 @@ export default function ToBePane({ projectId, pane }: Props) {
   }, [projectId])
 
   // Sync with the project: a TO-BE exists → done; it was cleared (a new AS-IS was generated)
-  // → back to idle, so the next approved AS-IS gets a fresh TO-BE
+  // → back to idle, so the next approved AS-IS gets a fresh TO-BE.
+  // The stage is a dependency too: a new / opened version resets the store to idle while the
+  // TO-BE it holds has the same number of steps — keyed on the length alone, the page stayed
+  // idle with steps, which no view shows (a blank page). A run in progress is never cut short.
   useEffect(() => {
-    if (tobeSteps.length > 0) tobe.setStage('done')
-    else if (useToBeStore.getState().stage === 'done') tobe.setStage('idle')
-  }, [tobeSteps.length])
+    const stage = useToBeStore.getState().stage
+    if (tobeSteps.length > 0) { if (stage === 'idle') tobe.setStage('done') }
+    else if (stage === 'done') tobe.setStage('idle')
+  }, [tobeSteps.length, tobe.stage])
 
   // Auto-scroll the progress log
   useEffect(() => {

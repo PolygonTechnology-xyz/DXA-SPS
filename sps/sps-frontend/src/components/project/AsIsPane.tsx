@@ -466,6 +466,7 @@ export default function AsIsPane({ projectId }: Props) {
           {gate === 'missing' && (
             <Notice tone="warn" action={
               <span style={{ display: 'flex', gap: 6 }}>
+                <Button size="sm" icon={Table2} onClick={() => navigate(`/projects/${projectId}/outputs/current/asis`)}>View the values</Button>
                 <Button size="sm" variant="primary" onClick={() => approve(true)}>Approve anyway</Button>
                 <Button size="sm" variant="ghost" onClick={() => setGate(null)}>Cancel</Button>
               </span>

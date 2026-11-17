@@ -465,6 +465,8 @@ svg.lucide { flex-shrink: 0; }
 .rv-divider::before, .rv-divider::after { content: ''; flex: 1; height: 1px; background: var(--accent); opacity: .35; }
 .rv-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 13px; }
 .rv-head strong { font-weight: 600; color: var(--ink); }
+.rv-link { display: inline-flex; align-items: center; gap: 6px; margin: -2px 0 10px; padding: 0; border: 0; background: none; color: var(--accent); font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer; }
+.rv-link:hover { text-decoration: underline; }
 .rv-time { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .rv-badge { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 8px; border-radius: 999px; font-size: 11px; font-weight: 600; background: var(--surface-2); color: var(--muted); border: 1px solid var(--line); }
 .rv-badge--new { background: var(--accent-soft); color: var(--accent); border-color: transparent; }

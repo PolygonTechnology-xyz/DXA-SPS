@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { Check, X, SkipForward, Globe, Sparkles, ChevronRight, ChevronDown, CircleCheck, HelpCircle, History } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Check, X, SkipForward, Globe, Sparkles, ChevronRight, ChevronDown, CircleCheck, HelpCircle, History, Table2 } from 'lucide-react'
 import { projectsApi, type Project, type StepSource } from '@/api/projects'
 import { AssistantAvatar, Button, Spinner, sourceHref } from '@/components/ui'
 import { openReference } from '@/stores/reference'
@@ -64,6 +65,7 @@ export default function ReviewSteps({ cardId, latest, createdAt, projectId, proj
   onAnswer: (text: string) => void
 }) {
   const qc = useQueryClient()
+  const navigate = useNavigate()
   const [deciding, setDeciding] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [answered, setAnswered] = useState<string[]>(() => readAnswered(cardId))
@@ -189,6 +191,12 @@ export default function ReviewSteps({ cardId, latest, createdAt, projectId, proj
           {createdAt && <time className="rv-time" dateTime={createdAt}>{when(createdAt)}</time>}
           {!latest && <button type="button" className="rv-old__hide" onClick={() => setShowOld(false)}>Hide</button>}
         </div>
+        {/* missing pain point / digital / law: the AS-IS page hides those columns — Outputs shows them */}
+        {topics.some((t) => t.questions.length > 0) && (
+          <button type="button" className="rv-link" onClick={() => navigate(`/projects/${projectId}/outputs/current/asis`)}>
+            <Table2 size={13} /> View pain point, digital &amp; law for every step
+          </button>
+        )}
         {/* the topics, in order */}
         <div className="rv-steps">
           {topics.map((t, i) => {

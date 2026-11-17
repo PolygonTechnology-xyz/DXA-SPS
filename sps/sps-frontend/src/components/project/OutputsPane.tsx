@@ -55,6 +55,23 @@ export default function OutputsPane({ projectId }: Props) {
     return () => cancelAnimationFrame(raf)
   }, [svgJob])
 
+  // /outputs/current/asis: the AS-IS being worked on (not approved yet, so not a version in
+  // Outputs) with its pain point, digital and law columns — linked from "N values missing"
+  if (vid === 'current' && onlyTab === 'asis') {
+    if (!project) return <p style={{ color: 'var(--muted)', fontSize: 14 }}>Loading…</p>
+    const current: ProcessVersion = {
+      id: 0, version: project.version?.version ?? 0, project_name: project.name, country: project.country ?? '',
+      approved_at: 0, asis_steps: project.asis_steps ?? [], tobe_steps: [],
+    }
+    return (
+      <div>
+        <PageHeader title="AS-IS Analysis" subtitle={`Current AS-IS${current.version ? ` · version ${current.version}` : ''} · ${current.asis_steps.length} steps · pain point, digital status and law of every step`}
+          actions={<Button size="sm" icon={ChevronLeft} onClick={() => navigate(`/projects/${projectId}/asis`)}>Back to AS-IS</Button>} />
+        <Analysis key="current-asis" v={current} tab="asis" projectId={projectId} />
+      </div>
+    )
+  }
+
   if (vid && onlyTab) {
     if (isLoading) return <p style={{ color: 'var(--muted)', fontSize: 14 }}>Loading…</p>
     if (!only) return <p style={{ color: 'var(--muted)', fontSize: 14 }}>This version is not in Outputs.</p>
