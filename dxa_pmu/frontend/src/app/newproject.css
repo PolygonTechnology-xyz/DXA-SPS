@@ -1,0 +1,88 @@
+/* New project journey (Figma WS-02). */
+
+.np { display: flex; flex-direction: column; gap: 20px; padding: 32px 48px 48px; container-type: inline-size; }
+.np h1, .np h2, .np p { margin: 0; }
+.np h1 { font-size: 22px; line-height: 30px; font-weight: 600; letter-spacing: -.008em; }
+.np-lead { color: var(--muted); font-size: 16px; line-height: 24px; margin-top: 4px !important; }
+
+.np-card { display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 20px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 16px; }
+.np-card h2 { font-size: 16px; line-height: 24px; font-weight: 600; margin: 0; }
+.np-card-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.np-sub { color: var(--muted); font-size: 14px; line-height: 20px; }
+.np-start { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.np-start > .np-card { min-height: 356px; }
+
+.np-tag { display: inline-flex; align-items: center; height: 24px; flex: none; padding: 0 8px; border-radius: 6px; background: var(--bg-subtle); color: var(--muted); font-size: 13px; font-weight: 500; white-space: nowrap; }
+.np-tag.brand { background: var(--accent-soft); color: #0b3a85; }
+.np-tag.ok { background: var(--ok-bg); color: var(--ok); }
+.np-tag.warn { background: var(--warn-bg); color: var(--warn); }
+.np-tag.bad { background: var(--bad-bg); color: var(--bad); }
+.np-bad, .np .np-bad { color: var(--bad); }
+
+/* document */
+.np-drop { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 24px; text-align: center; background: var(--bg-subtle); border: 1px dashed var(--line-strong); border-radius: 12px; }
+.np-drop.over { border-color: var(--accent); background: var(--accent-soft); }
+.np-drop strong { font-size: 16px; line-height: 24px; font-weight: 500; }
+.np-drop > span:not(.np-drop-ic) { color: var(--muted); font-size: 14px; }
+.np-drop-ic { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 10px; background: var(--surface); }
+.np-file { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--line-strong); border-radius: 12px; }
+.np-file-ic { width: 36px; height: 36px; flex: none; display: grid; place-items: center; border-radius: 10px; background: var(--bg-subtle); }
+.np-file div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.np-file strong { font-size: 16px; line-height: 24px; font-weight: 500; overflow-wrap: anywhere; }
+.np-file div span { color: var(--muted); font-size: 14px; line-height: 20px; }
+.np-file div span.np-bad { color: var(--bad); }
+
+/* chat */
+.np-log { flex: 1 1 0; min-height: 180px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+.np-msg { flex: none; display: flex; flex-direction: column; gap: 4px; padding: 14px; border-radius: 12px; background: var(--bg-subtle); font-size: 14px; line-height: 20px; }
+.np-msg b { color: var(--muted); font-size: 15px; font-weight: 600; }
+.np-msg p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.np-msg.user { align-self: flex-end; max-width: 85%; background: var(--accent-soft); }
+.np-msg.error p { color: var(--bad); }
+.np-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.np-chips button { height: 36px; padding: 0 14px 0 12px; border: 1px solid var(--line-control); border-radius: 10px; background: var(--surface); font-size: 15px; font-weight: 500; }
+.np-chips button:hover:not(:disabled) { background: var(--bg-subtle); }
+.np-composer { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 14px; border: 1px solid var(--line-strong); border-radius: 12px; }
+.np-composer:focus-within { border-color: var(--accent); }
+.np-composer input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; font-size: 16px; }
+.np-mic { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; background: none; }
+.np-mic:disabled { opacity: .4; cursor: not-allowed; }
+
+/* draft fields */
+.np-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; align-items: start; }
+.np-field { display: flex; align-items: center; gap: 12px; min-height: 57px; padding: 12px 0; border-bottom: 1px solid var(--line); font-size: 14px; line-height: 20px; }
+.np-label { width: 130px; flex: none; color: var(--muted); }
+.np-value { flex: 1; min-width: 0; font-weight: 500; overflow-wrap: anywhere; }
+button.np-value { padding: 0; border: 0; background: none; text-align: left; font-size: 14px; border-radius: 4px; }
+button.np-value:hover:not(:disabled) { text-decoration: underline dotted; text-underline-offset: 3px; }
+button.np-value:disabled { cursor: default; color: var(--ink); }
+.np-value.missing { color: var(--muted); }
+.np-link { flex: none; padding: 6px 12px; border: 0; border-radius: 999px; background: none; color: var(--accent); font-size: 14px; font-weight: 500; }
+.np-link:hover:not(:disabled) { background: var(--accent-soft); }
+.np-link:disabled { opacity: .5; cursor: default; }
+.np-editor { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.np-editor > .field, .np-two, .np-milestones { width: 100%; }
+.np-editor textarea { resize: vertical; }
+.np-editor small { color: var(--muted); }
+.np-two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.np-two .field { min-width: 0; }
+.np-milestones { display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto; }
+.np-milestone { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.np-milestone .field:first-child { flex: 1; min-width: 140px; }
+.np-milestone .field[type="date"] { width: auto; }
+.np-editor-btns { display: flex; gap: 8px; }
+.np-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.np-actions p { flex: 1; min-width: 200px; color: var(--muted); font-size: 14px; }
+
+.np-setup { margin: 16px 0; gap: 0; }
+.np-setup .np-card-h { padding-bottom: 4px; }
+
+@container (max-width: 860px) {
+  .np-start, .np-fields { grid-template-columns: minmax(0, 1fr); }
+  .np-log { flex: none; max-height: 420px; }
+}
+@container (max-width: 520px) {
+  .np-field { flex-wrap: wrap; }
+  .np-label { width: 100%; }
+}
+@media (max-width: 600px) { .np { padding: 16px; } }

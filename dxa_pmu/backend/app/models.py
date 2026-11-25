@@ -26,6 +26,8 @@ class Project(Base):
     budget: Mapped[int | None]
     milestones: Mapped[list] = mapped_column(JSON, default=list)
     files: Mapped[list] = mapped_column(JSON, default=list)
+    phases: Mapped[list | None] = mapped_column(JSON)  # phase names from the setup draft
+    budget_text: Mapped[str | None] = mapped_column(String(120))  # as written, with its currency
 
     jira_site: Mapped[str | None] = mapped_column(String(300))
     jira_key: Mapped[str | None] = mapped_column(String(50))
@@ -166,7 +168,11 @@ class RegisterRisk(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     mitigation: Mapped[str] = mapped_column(Text, default="")
     severity: Mapped[str] = mapped_column(String(10), default="medium")  # high | medium | low
-    status: Mapped[str] = mapped_column(String(12), default="open")  # open | mitigating | accepted | closed
+    status: Mapped[str] = mapped_column(String(12), default="open")  # suggested | open | mitigating | accepted | closed | dismissed
+    number: Mapped[int | None]  # shown as R-01, numbered within the project
+    likelihood: Mapped[str | None] = mapped_column(String(10))  # high | medium | low
+    impact: Mapped[str | None] = mapped_column(String(10))  # high | medium | low
+    trend: Mapped[str | None] = mapped_column(String(10))  # rising | steady | falling, set by a person
     owner: Mapped[str | None] = mapped_column(String(120))
     due: Mapped[str | None] = mapped_column(String(10))  # review / mitigation date
     task_keys: Mapped[list] = mapped_column(JSON, default=list)
@@ -186,3 +192,17 @@ class ChatMessage(Base):
     role: Mapped[str] = mapped_column(String(10))  # user | assistant
     content: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class SharedDoc(Base):
+    """A document shared by every project (policies, templates, guidelines). The AI reads the extracted text."""
+
+    __tablename__ = "shared_docs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    name: Mapped[str] = mapped_column(String(200))
+    size: Mapped[int] = mapped_column(default=0)
+    text: Mapped[str] = mapped_column(Text, default="")
+    category: Mapped[str] = mapped_column(String(40), default="Other")
+    tags: Mapped[list] = mapped_column(JSON, default=list)
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)

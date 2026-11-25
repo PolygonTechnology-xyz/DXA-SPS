@@ -2,12 +2,11 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
-import { mockKnowledge, type KnowledgeDoc, type Project, type ReportMeta } from "@/lib/mock";
+import type { NewProjectInput, Project, ReportMeta } from "@/lib/mock";
 
 interface Store {
   projects: Project[];
-  knowledge: KnowledgeDoc[];
-  addProject: (p: { name: string; goal: string }) => Promise<Project>;
+  addProject: (p: NewProjectInput) => Promise<Project>;
   /** True once projects have been loaded from the server. */
   ready: boolean;
   /** Set when the first load failed, e.g. the backend is not running. */
@@ -29,9 +28,8 @@ interface Store {
   updateProject: (id: string, patch: SavedFields) => void;
   /** Same, but throws the error so the caller can show it. */
   patchProject: (id: string, patch: SavedFields) => Promise<void>;
-  addDocs: (files: { name: string; size: number }[]) => void;
-  updateDoc: (id: string, patch: Partial<Pick<KnowledgeDoc, "category" | "tags">>) => void;
-  removeDoc: (id: string) => void;
+  /** Forget a project that was deleted on the server. */
+  dropProject: (id: string) => void;
 }
 
 /** The fields the backend accepts on PATCH /projects/{id}. */
@@ -45,14 +43,8 @@ export function useStore() {
   return v;
 }
 
-function fmtSize(bytes: number) {
-  if (bytes > 1e6) return (bytes / 1e6).toFixed(1) + " MB";
-  return Math.max(1, Math.round(bytes / 1e3)) + " KB";
-}
-
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [projects, setProjects] = useState<Project[]>([]);
-  const [knowledge, setKnowledge] = useState(mockKnowledge);
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reports, setReports] = useState<ReportMeta[]>([]);
@@ -100,32 +92,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     patchProject(id, patch).catch(() => {});
   }, [patchProject]);
 
-  const addDocs = useCallback<Store["addDocs"]>((files) => {
-    const today = new Date().toISOString().slice(0, 10);
-    setKnowledge((prev) => [
-      ...files.map((f, i) => ({
-        id: `k-${Date.now()}-${i}`,
-        name: f.name,
-        size: fmtSize(f.size),
-        category: "Other",
-        tags: [],
-        uploadedAt: today,
-      })),
-      ...prev,
-    ]);
-  }, []);
-
-  const updateDoc = useCallback<Store["updateDoc"]>((id, patch) => {
-    setKnowledge((prev) => prev.map((d) => (d.id === id ? { ...d, ...patch } : d)));
-  }, []);
-
-  const removeDoc = useCallback((id: string) => {
-    setKnowledge((prev) => prev.filter((d) => d.id !== id));
-  }, []);
+  const dropProject = useCallback((id: string) => setProjects((prev) => prev.filter((p) => p.id !== id)), []);
 
   const value = useMemo(
-    () => ({ projects, knowledge, ready, loadError, reports, refreshReports, reportSettingsFor, openReportSettings, closeReportSettings, jiraFor, openJira, closeJira, nudge, setNudge, addProject, replaceProject, updateProject, patchProject, addDocs, updateDoc, removeDoc }),
-    [projects, knowledge, ready, loadError, reports, refreshReports, reportSettingsFor, openReportSettings, closeReportSettings, jiraFor, openJira, closeJira, nudge, setNudge, addProject, replaceProject, updateProject, patchProject, addDocs, updateDoc, removeDoc],
+    () => ({ projects, ready, loadError, reports, refreshReports, reportSettingsFor, openReportSettings, closeReportSettings, jiraFor, openJira, closeJira, nudge, setNudge, addProject, replaceProject, updateProject, patchProject, dropProject }),
+    [projects, ready, loadError, reports, refreshReports, reportSettingsFor, openReportSettings, closeReportSettings, jiraFor, openJira, closeJira, nudge, setNudge, addProject, replaceProject, updateProject, patchProject, dropProject],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

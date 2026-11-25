@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
-import { HealthDot, Progress, StatusChip, money } from "@/components/Badges";
-import { Dashboard } from "@/components/Dashboard";
+import { StatusChip } from "@/components/Badges";
+import { SetupCard } from "@/components/SetupCard";
+import { Dashboard, SyncControls, useJiraSync } from "@/components/Dashboard";
 import { useStore } from "@/components/Store";
 import { api } from "@/lib/api";
 import type { Project } from "@/lib/mock";
@@ -127,6 +128,7 @@ function Detail() {
   const { projects, ready, loadError, updateProject, openJira, nudge, setNudge } = useStore();
   const [act, setAct] = useState<Act | null>(null);
   const p = projects.find((x) => x.id === id);
+  const { sync, refresh } = useJiraSync(id);
 
   useEffect(() => {
     if (nudge && nudge === id) { setAct("jira"); setNudge(null); }
@@ -140,19 +142,19 @@ function Detail() {
     );
   }
 
-  const tracked = p.manager != null;
+  const hasSetup = !!(p.manager || p.startDate || p.endDate || p.budgetText || p.budget != null || p.phases?.length || p.milestones.length);
   const hasDashboard = !!p.jira || p.files.length > 0;
 
   return (
     <>
       <header className="topbar">
-        <Link href="/projects" className="muted">All Projects</Link>
-        <span className="muted">/</span>
-        <h2>{p.name}</h2>
-        {!act && <button className="btn rail-open" onClick={() => setAct("docs")}>💬 Assistant</button>}
+        <h2>{hasDashboard ? "Overview" : p.name}</h2>
+        <span className="topbar-spacer" />
+        {hasDashboard && <SyncControls project={p} sync={sync} refresh={refresh} />}
+        {!act && <button className="ds-btn sm rail-open" onClick={() => setAct("docs")}>Assistant</button>}
       </header>
       <div className="split">
-        <div className="page">
+        <div className={`page${hasDashboard ? " ov-page" : ""}`}>
           <div className="page-inner wide">
             {!hasDashboard && (
               <div className="card p-card">
@@ -168,28 +170,11 @@ function Detail() {
               </div>
             )}
 
-            {hasDashboard && <Dashboard project={p} />}
+            {hasSetup && !p.jira && <SetupCard project={p} />}
 
-            {tracked && (
-              <>
-                <div className="stats">
-                  <div className="card"><small className="muted">Progress</small><strong>{p.progress}%</strong><Progress value={p.progress} /></div>
-                  <div className="card"><small className="muted">Health</small><strong><HealthDot health={p.health} /></strong></div>
-                  {p.budget != null && <div className="card"><small className="muted">Budget</small><strong>{money(p.budget)}</strong></div>}
-                  <div className="card"><small className="muted">Manager</small><strong>{p.manager}</strong></div>
-                  <div className="card"><small className="muted">Timeline</small><strong className="small">{p.startDate} → {p.endDate}</strong></div>
-                </div>
-                <h3 className="section-title">Milestones</h3>
-                <ul className="miles">
-                  {p.milestones.map((m) => (
-                    <li key={m.title} className="card row between">
-                      <span><span className={`check${m.done ? " done" : ""}`}>{m.done ? "✓" : ""}</span> {m.title}</span>
-                      <small className="muted">{m.due}</small>
-                    </li>
-                  ))}
-                </ul>
-              </>
-            )}
+            {hasDashboard && <Dashboard project={p} sync={sync} onRetrySync={refresh} />}
+
+            {hasSetup && p.jira && <SetupCard project={p} />}
 
             {p.files.length > 0 && (
               <details className="rec" id="files" open>

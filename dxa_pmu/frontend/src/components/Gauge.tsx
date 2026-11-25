@@ -39,12 +39,12 @@ export function Gauge({ value }: { value: number }) {
         marginInPercent={{ top: 0.06, bottom: 0, left: 0.06, right: 0.06 }}
         arc={{
           width: 0.16, padding: 0.02, cornerRadius: 8,
-          subArcs: [{ limit: 40, color: "#b8261f" }, { limit: 70, color: "#e08a1e" }, { limit: 100, color: "#10a392" }],
+          subArcs: [{ limit: 40, color: "#b3261e" }, { limit: 70, color: "#d96f0e" }, { limit: 100, color: "#0e9f8e" }],
         }}
-        pointer={{ type: "needle", color: "#0b3a4a", baseColor: "#0b3a4a", length: 0.7, width: 12, animate: true, elastic: false }}
+        pointer={{ type: "needle", color: "#053347", baseColor: "#053347", length: 0.7, width: 12, animate: true, elastic: false }}
         labels={{
           valueLabel: { hide: true },
-          tickLabels: { type: "outer", hideMinMax: false, defaultTickValueConfig: { style: { fontSize: "11px", fill: "#6a7472" } }, ticks: [{ value: 0 }, { value: 100 }], defaultTickLineConfig: { hide: true } },
+          tickLabels: { type: "outer", hideMinMax: false, defaultTickValueConfig: { formatTextValue: (v: number) => String(v), style: { fontSize: "13px", fill: "#4b5565" } }, ticks: [{ value: 0 }, { value: 100 }], defaultTickLineConfig: { hide: true } },
         }}
       />
     </div>

@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from .config import get_settings
 from .db import init_db
 from .routers import ai as ai_router
-from .routers import documents, meetings, projects, register, reports, templates
+from .routers import documents, drafts, knowledge, meetings, projects, register, reports, templates
 from .services import ai, scheduler
 
 logging.basicConfig(level=logging.INFO)
@@ -39,5 +39,5 @@ def health():
     return {"status": "ok"}
 
 
-for r in (projects.router, ai_router.router, reports.router, meetings.router, templates.router, register.router, documents.router):
+for r in (projects.router, ai_router.router, reports.router, meetings.router, templates.router, register.router, documents.router, drafts.router, knowledge.router):
     app.include_router(r, prefix="/api")

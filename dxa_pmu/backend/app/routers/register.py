@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from ..db import get_db
 from ..models import Project, RegisterRisk
 from ..schemas import RegisterIn, RegisterOut, RegisterPatch
-from ..services.register import list_register as _list
+from ..services.register import list_register as _list, next_number
 from .projects import get_project
 
 router = APIRouter(tags=["risk register"])
@@ -30,7 +30,7 @@ def add_risk(body: RegisterIn, p: Project = Depends(get_project), db: Session = 
     d["title"] = d["title"].strip()
     d["owner"] = (d["owner"] or "").strip() or None
     d["source"] = "manual"
-    db.add(RegisterRisk(id=str(uuid.uuid4()), project_id=p.id, **d))
+    db.add(RegisterRisk(id=str(uuid.uuid4()), project_id=p.id, number=next_number(db, p.id), **d))
     db.commit()
     return _list(db, p)
 
@@ -43,7 +43,7 @@ def add_from_analysis(body: RegisterIn, p: Project = Depends(get_project), db: S
     if not have:
         d = body.model_dump()
         d["title"], d["owner"], d["source"] = title, (body.owner or "").strip() or None, "analysis"
-        db.add(RegisterRisk(id=str(uuid.uuid4()), project_id=p.id, **d))
+        db.add(RegisterRisk(id=str(uuid.uuid4()), project_id=p.id, number=next_number(db, p.id), **d))
         db.commit()
     return _list(db, p)
 
@@ -54,6 +54,8 @@ def update_risk(risk_id: str, body: RegisterPatch, db: Session = Depends(get_db)
     for k, v in body.model_dump(exclude_unset=True).items():
         if k in ("owner", "due"):
             v = (v or "").strip() or None
+        elif v is None and k not in ("likelihood", "impact", "trend"):
+            continue  # these three can be cleared; the others cannot be empty
         setattr(r, k, v)
     db.commit()
     return _list(db, db.get(Project, r.project_id))

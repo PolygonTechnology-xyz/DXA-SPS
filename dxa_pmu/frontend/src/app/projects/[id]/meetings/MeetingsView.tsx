@@ -1,168 +1,263 @@
 "use client";
 
+/** Meetings (Figma MT-01), adding one (MT-02), and the Actions (MT-05) and Decisions (MT-06) records. */
+
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
+import { FormatsModal } from "@/components/FormatsModal";
+import { useFormats } from "@/components/FormatPanel";
 import { useStore } from "@/components/Store";
-import { FormatPanel, FormatPicker } from "@/components/FormatPanel";
-import { PreviewModal } from "@/components/PreviewModal";
-import { ChatPanel } from "@/components/ChatPanel";
-import { api } from "@/lib/api";
-import type { Meeting, Minutes } from "@/lib/mock";
+import { Chips, Empty, ErrorNote, Modal, PageHead, Person, SOON, Search, Section, Tag, longDate, plural, shortDate } from "@/components/ui";
+import { api, uploadFile } from "@/lib/api";
+import { downloadCsv } from "@/lib/csv";
+import { iso } from "@/lib/schedule";
+import type { Decision, Meeting, Project } from "@/lib/mock";
 
-const fmt = (d: string) => new Date(d + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
-const today = () => new Date().toISOString().slice(0, 10);
+type View = "all" | "review" | "notranscript" | "approved" | "actions" | "decisions";
 
-function MeetingCard({ m, onChange, onDelete }: { m: Meeting; onChange: (m: Meeting) => void; onDelete: () => void }) {
-  const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [preview, setPreview] = useState(false);
-  const [draft, setDraft] = useState<Minutes | null>(null); // the reviewer's edits to an unapproved draft
-  const approved = !!m.approvedAt;
-  const minutes = draft ?? m.minutes;
+const needsReview = (m: Meeting) => !!m.minutes && !m.approvedAt;
+const noTranscript = (m: Meeting) => !m.notes.trim() && !m.minutes;
 
-  async function run<T>(fn: () => Promise<T>, then: (r: T) => void) {
-    setBusy(true); setError(null);
-    try { then(await fn()); } catch (e) { setError((e as Error).message); }
-    setBusy(false);
-  }
-  const generate = () => run(() => api<Meeting>(`/meetings/${m.id}/minutes`, { method: "POST" }), (r) => { setDraft(null); onChange(r); });
-  const approve = () => minutes && run(() => api<Meeting>(`/meetings/${m.id}/approve`, { method: "POST", body: minutes }), (r) => { setDraft(null); onChange(r); });
-  const edit = (patch: Partial<Minutes>) => minutes && setDraft({ ...minutes, ...patch });
+interface ActionRow { key: string; what: string; from: string; href?: string; owner: string | null; due: string | null; jira: string | null; jiraUrl?: string }
 
-  return (
-    <article className="pd-card mt-card">
-      <button className="mt-head" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-        <span><b>{m.title}</b><small>{fmt(m.heldOn)}</small></span>
-        <span className={`pd-sev ${approved ? "low" : m.minutes ? "medium" : "idle"}`}>{approved ? "Minutes approved" : m.minutes ? "Draft · needs approval" : "No minutes yet"}</span>
-      </button>
-      {open && (
-        <div className="mt-body">
-          {error && <div className="note bad" role="alert">⚠ {error}</div>}
-          {!minutes ? (
-            <>
-              <p className="pd-muted">{m.notes.trim() ? "Claude can draft minutes from this transcript. You review and approve them." : "No transcript was added, so minutes can't be drafted."}</p>
-              <pre className="mt-notes">{m.notes}</pre>
-            </>
-          ) : approved && !draft ? (
-            <>
-              <MinutesView mn={minutes} />
-              <details className="mt-tr"><summary>Transcript</summary><pre className="mt-notes">{m.notes}</pre></details>
-            </>
-          ) : (
-            <>
-              <label className="mt-l">Summary<textarea className="field" rows={3} value={minutes.summary} onChange={(e) => edit({ summary: e.target.value })} /></label>
-              <div className="mt-l">Decisions</div>
-              {minutes.decisions.map((d, i) => (
-                <div className="mt-edit" key={i}><input className="field" value={d} onChange={(e) => edit({ decisions: minutes.decisions.map((x, j) => (j === i ? e.target.value : x)) })} aria-label={`Decision ${i + 1}`} />
-                  <button className="icon-del" onClick={() => edit({ decisions: minutes.decisions.filter((_, j) => j !== i) })} aria-label="Remove decision">🗑</button></div>
-              ))}
-              <div className="mt-l">Actions</div>
-              {minutes.actions.map((a, i) => (
-                <div className="mt-edit" key={i}>
-                  <input className="field" value={a.what} onChange={(e) => edit({ actions: minutes.actions.map((x, j) => (j === i ? { ...x, what: e.target.value } : x)) })} aria-label={`Action ${i + 1}`} />
-                  <input className="field mt-owner" placeholder="Owner" value={a.owner ?? ""} onChange={(e) => edit({ actions: minutes.actions.map((x, j) => (j === i ? { ...x, owner: e.target.value || null } : x)) })} aria-label={`Owner of action ${i + 1}`} />
-                  <button className="icon-del" onClick={() => edit({ actions: minutes.actions.filter((_, j) => j !== i) })} aria-label="Remove action">🗑</button>
-                </div>
-              ))}
-              {(minutes.risks?.length ?? 0) > 0 && <div className="mt-l">Risks found</div>}
-              {minutes.risks?.map((r, i) => (
-                <div className="mt-edit" key={i}>
-                  <input className="field" value={r.title} onChange={(e) => edit({ risks: minutes.risks!.map((x, j) => (j === i ? { ...x, title: e.target.value } : x)) })} aria-label={`Risk ${i + 1}`} />
-                  <input className="field" value={r.ifNotDone} placeholder="If this is not done…" onChange={(e) => edit({ risks: minutes.risks!.map((x, j) => (j === i ? { ...x, ifNotDone: e.target.value } : x)) })} aria-label={`If not done ${i + 1}`} />
-                  <input className="field" value={r.impact} placeholder="…this will happen" onChange={(e) => edit({ risks: minutes.risks!.map((x, j) => (j === i ? { ...x, impact: e.target.value } : x)) })} aria-label={`Impact ${i + 1}`} />
-                  <button className="icon-del" onClick={() => edit({ risks: minutes.risks!.filter((_, j) => j !== i) })} aria-label="Remove risk">🗑</button>
-                </div>
-              ))}
-              <p className="pd-muted">Edit or remove anything that is wrong, then approve. Risks found go into the risk register automatically. Only approved minutes count as the record.</p>
-            </>
-          )}
-          {minutes && (
-            <ChatPanel<{ reply: string; minutes: Minutes; meeting: Meeting }> path={`/meetings/${m.id}/revise`} current={minutes}
-              onResult={(r) => { if (approved) setDraft(r.minutes); else setDraft(null); onChange(r.meeting); }}
-              hint={approved ? "Change the design or ask for text changes. Text changes to approved minutes need approving again." : "Change the text or the design (colours, font, sizes). Nothing is final until you approve."}
-              examples={["Make it look more colourful and professional", "Use a serif font and dark blue headings", "Make the summary shorter"]} />
-          )}
-          <div className="mt-foot">
-            <button className="pd-btn" onClick={onDelete} disabled={busy}>Delete meeting</button>
-            <span className="pd-actions">
-              {m.minutes && <FormatPicker projectId={m.projectId} kind="minutes" value={m.formatId ?? null} disabled={busy} onPick={(f) => void run(() => api<Meeting>(`/meetings/${m.id}/format`, { method: "PUT", body: { formatId: f } }), onChange)} />}
-              {m.minutes && !draft && <><button className="pd-btn" onClick={() => setPreview(true)}>👁 Preview</button><a className="pd-btn" href={`/api/meetings/${m.id}/minutes/docx`}>⬇ Download Word</a></>}
-              <button className="pd-btn" disabled={busy || !m.notes.trim()} onClick={() => void generate()}>{busy ? "Working…" : minutes ? "↻ Redraft" : "Draft minutes"}</button>
-              {minutes && (!approved || draft) && <button className="pd-btn dark" disabled={busy || !minutes.summary.trim()} onClick={() => void approve()}>Approve minutes</button>}
-            </span>
-          </div>
-        </div>
-      )}
-      {preview && <PreviewModal title={`${m.title} · minutes`} previewPath={`/meetings/${m.id}/minutes/preview`} docxHref={`/api/meetings/${m.id}/minutes/docx`} onClose={() => setPreview(false)} />}
-    </article>
-  );
+/** Actions agreed in approved minutes, and open Jira tasks. */
+function actionRows(project: Project | undefined, meetings: Meeting[]): ActionRow[] {
+  const fromMinutes = meetings.filter((m) => m.approvedAt && m.minutes).flatMap((m) => m.minutes!.actions.map((a, i): ActionRow => ({
+    key: `${m.id}-${i}`, what: a.what, from: `${m.title}, ${shortDate(m.heldOn)}`, href: `/projects/${m.projectId}/meetings/${m.id}`, owner: a.owner, due: a.due ?? null, jira: null,
+  })));
+  const fromJira = (project?.tasks ?? []).filter((t) => t.category !== "done").map((t): ActionRow => ({
+    key: t.key, what: t.summary, from: "Jira", owner: t.assignee, due: t.due, jira: t.key, jiraUrl: project?.jira ? `${project.jira.site}/browse/${t.key}` : undefined,
+  }));
+  // overdue and dated first, undated last
+  return [...fromMinutes, ...fromJira].sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999"));
 }
 
-function MinutesView({ mn }: { mn: Minutes }) {
-  return (
-    <>
-      <p>{mn.summary}</p>
-      {mn.decisions.length > 0 && <><div className="mt-l">Decisions</div><ul className="mt-list">{mn.decisions.map((d, i) => <li key={i}>{d}</li>)}</ul></>}
-      {(mn.risks?.length ?? 0) > 0 && <><div className="mt-l">Risks found</div><ul className="mt-list">{mn.risks!.map((r, i) => <li key={i}><b>{r.title}</b> <span className={`pd-sev ${r.severity}`}>{r.severity}</span><br />If {r.ifNotDone.replace(/\.$/, "")}, {r.impact}{r.owner ? <em> — {r.owner}</em> : null}</li>)}</ul></>}
-      {mn.actions.length > 0 && <><div className="mt-l">Actions</div><ul className="mt-list">{mn.actions.map((a, i) => <li key={i}>{a.what}{a.owner ? <em> — {a.owner}</em> : null}</li>)}</ul></>}
-    </>
-  );
-}
+const daysLate = (due: string | null) => (due && due < iso(new Date()) ? Math.round((new Date(`${iso(new Date())}T00:00:00`).getTime() - new Date(`${due}T00:00:00`).getTime()) / 86_400_000) : 0);
 
 export function MeetingsView() {
   const { id } = useParams<{ id: string }>();
   const { projects } = useStore();
   const project = projects.find((p) => p.id === id);
   const [meetings, setMeetings] = useState<Meeting[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [decisions, setDecisions] = useState<Decision[] | null>(null);
+  const [view, setView] = useState<View>("all");
   const [adding, setAdding] = useState(false);
-  const [form, setForm] = useState({ title: "", heldOn: today(), notes: "" });
-  const [saving, setSaving] = useState(false);
+  const [formats, setFormats] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(() => api<Meeting[]>(`/projects/${id}/meetings`).then(setMeetings).catch((e) => setError((e as Error).message)), [id]);
+  const load = useCallback(() => Promise.all([api<Meeting[]>(`/projects/${id}/meetings`), api<Decision[]>(`/projects/${id}/decisions?limit=500`)])
+    .then(([m, d]) => { setMeetings(m); setDecisions(d); })
+    .catch((e) => { setMeetings((v) => v ?? []); setDecisions((v) => v ?? []); setError((e as Error).message); }), [id]);
   useEffect(() => { void load(); }, [load]);
 
-  async function add(e: React.FormEvent) {
-    e.preventDefault();
-    setSaving(true); setError(null);
+  const all = meetings ?? [];
+  const actions = actionRows(project, all);
+  const records = view === "actions" || view === "decisions";
+  const title = view === "actions" ? "Actions" : view === "decisions" ? "Decisions" : "All meetings";
+
+  const exportRecords = () => view === "actions"
+    ? downloadCsv("actions.csv", [["Action", "From", "Owner", "Due", "Jira"], ...actions.map((a) => [a.what, a.from, a.owner, a.due, a.jira])])
+    : downloadCsv("decisions.csv", [["ID", "Decision", "Meeting", "Date", "Status"], ...(decisions ?? []).map((d) => [`D-${d.number}`, d.text, d.meetingTitle, d.heldOn, d.status])]);
+
+  return (
+    <Section
+      crumbs={[{ label: "Meetings" }, { label: title }]}
+      active={view}
+      onSelect={(v) => (v === "formats" ? setFormats(true) : setView(v as View))}
+      menu={[
+        { items: [{ id: "all", label: "All meetings", icon: "meetings", count: all.length }] },
+        { title: "Status", items: [
+          { id: "review", label: "Minutes to review", icon: "reports", count: all.filter(needsReview).length },
+          { id: "notranscript", label: "No transcript", icon: "alert", count: all.filter(noTranscript).length },
+          { id: "approved", label: "Approved", icon: "check", count: all.filter((m) => m.approvedAt).length }] },
+        { title: "Records", items: [
+          { id: "actions", label: "Actions", icon: "checklist", count: actions.length },
+          { id: "decisions", label: "Decisions", icon: "flag", count: decisions?.length ?? 0 }] },
+        { title: "Setup", items: [{ id: "formats", label: "Minutes formats", icon: "file" }] },
+      ]}
+      actions={records ? (<>
+        <button type="button" className="ds-btn sm" onClick={exportRecords}>Export</button>
+        {view === "actions" && <button type="button" className="ds-btn sm primary" disabled title={SOON}>Add action</button>}
+      </>) : (<>
+        <button type="button" className="ds-btn sm" onClick={() => setFormats(true)}>Minutes formats</button>
+        <button type="button" className="ds-btn sm primary" onClick={() => setAdding(true)}>Add meeting</button>
+      </>)}
+    >
+      <ErrorNote error={error} />
+      {meetings === null ? <p className="sub-text">Loading…</p>
+        : view === "actions" ? <Actions rows={actions} />
+        : view === "decisions" ? <Decisions rows={decisions ?? []} projectId={id} />
+        : <List projectId={id} meetings={all.filter((m) => view === "review" ? needsReview(m) : view === "notranscript" ? noTranscript(m) : view === "approved" ? !!m.approvedAt : true)} total={all.length} />}
+      {adding && <AddMeeting projectId={id} onSaved={() => { setAdding(false); void load(); }} onClose={() => { setAdding(false); void load(); }} onManage={() => { setAdding(false); setFormats(true); }} />}
+      {formats && <FormatsModal projectId={id} initial="minutes" onClose={() => setFormats(false)} />}
+    </Section>
+  );
+}
+
+function List({ projectId, meetings, total }: { projectId: string; meetings: Meeting[]; total: number }) {
+  return (<>
+    <PageHead title="Meetings" lead="Add a transcript. DXA drafts the minutes in your format and you approve them." />
+    <section className="panel">
+      {meetings.length === 0 ? <Empty title={total === 0 ? "No meetings yet" : "No meetings here"} text={total === 0 ? "Choose Add meeting to start." : undefined} /> : (
+        <div className="table-x">
+          <table className="tbl">
+            <thead><tr><th>Meeting</th><th>Transcript</th><th>Minutes</th><th>Found</th><th><span className="visually-hidden">Open</span></th></tr></thead>
+            <tbody>
+              {meetings.map((m) => {
+                const href = `/projects/${projectId}/meetings/${m.id}`;
+                return (
+                  <tr key={m.id}>
+                    <td><Link className="cell-title" href={href}>{m.title}</Link><span className="cell-sub">{longDate(m.heldOn)}</span></td>
+                    <td>{m.notes.trim() ? <Tag tone="ok">Transcript ready</Tag> : <Tag tone="warn">No transcript</Tag>}</td>
+                    <td>{m.approvedAt ? <Tag tone="ok">Approved</Tag> : m.minutes ? <Tag tone="ai">Draft to review</Tag> : <Tag>Not started</Tag>}</td>
+                    <td className="sub-text">{m.minutes && <>{plural(m.minutes.decisions.length, "decision")}<br />{plural(m.minutes.actions.length, "action")}</>}</td>
+                    <td>{needsReview(m) ? <Link className="ds-btn sm primary" href={href}>Review minutes</Link> : noTranscript(m) ? <Link className="ds-btn sm" href={href}>Add transcript</Link> : <Link className="link-text" href={href}>Open</Link>}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div className="panel-foot">Showing {meetings.length} of {plural(total, "meeting")}</div>
+    </section>
+    <div className="well"><b>No transcript?</b><p className="sub-text">Open the meeting and add your own notes. Recording upload and Fathom are not connected yet.</p></div>
+  </>);
+}
+
+const PAGE = 25;
+
+function Actions({ rows }: { rows: ActionRow[] }) {
+  const [q, setQ] = useState("");
+  const [filter, setFilter] = useState<"all" | "overdue" | "noowner">("all");
+  const [shown, setShown] = useState(PAGE);
+  const overdue = rows.filter((r) => daysLate(r.due));
+  const noOwner = rows.filter((r) => !r.owner);
+  const list = (filter === "overdue" ? overdue : filter === "noowner" ? noOwner : rows).filter((r) => `${r.what} ${r.owner ?? ""} ${r.jira ?? ""} ${r.from}`.toLowerCase().includes(q.trim().toLowerCase()));
+  return (<>
+    <PageHead title="Actions" lead="Action items from approved minutes, and open Jira tasks. DXA never changes Jira." />
+    <Chips label="Filter actions" value={filter} onChange={(v) => { setFilter(v); setShown(PAGE); }} options={[{ id: "all", label: "Open", count: rows.length }, { id: "overdue", label: "Overdue", count: overdue.length }, { id: "noowner", label: "Without an owner", count: noOwner.length }]} />
+    <section className="panel">
+      <div className="panel-head"><h2>Open actions</h2><Search value={q} onChange={setQ} placeholder="Search actions" /></div>
+      {list.length === 0 ? <Empty title="No actions" /> : (
+        <div className="table-x"><table className="tbl">
+          <thead><tr><th>Action</th><th>Owner</th><th>Due</th><th>Jira</th><th>Status</th></tr></thead>
+          <tbody>{list.slice(0, shown).map((r) => {
+            const late = daysLate(r.due);
+            return (
+              <tr key={r.key}>
+                <td><span className="cell-title">{r.what}</span>{r.href ? <Link className="cell-sub" href={r.href}>{r.from}</Link> : <span className="cell-sub">{r.from}</span>}</td>
+                <td><Person name={r.owner} /></td>
+                <td>{r.due ? shortDate(r.due) : <span className="sub-text">No date</span>}</td>
+                <td>{r.jira ? (r.jiraUrl ? <a className="tag" href={r.jiraUrl} target="_blank" rel="noreferrer">{r.jira}</a> : <Tag>{r.jira}</Tag>) : "—"}</td>
+                <td>{late ? <Tag tone="bad">{plural(late, "day")} late</Tag> : <Tag>Open</Tag>}</td>
+              </tr>
+            );
+          })}</tbody>
+        </table></div>
+      )}
+      <div className="panel-foot"><span>Showing {Math.min(shown, list.length)} of {list.length}, earliest due first</span>{shown < list.length && <button type="button" className="ds-btn sm" onClick={() => setShown((n) => n + PAGE)}>Show more</button>}</div>
+    </section>
+  </>);
+}
+
+function Decisions({ rows, projectId }: { rows: Decision[]; projectId: string }) {
+  const [q, setQ] = useState("");
+  const list = rows.filter((d) => `D-${d.number} ${d.text} ${d.meetingTitle}`.toLowerCase().includes(q.trim().toLowerCase()));
+  return (<>
+    <PageHead title="Decisions" lead="Every decision links to the meeting it was made in. Decisions in unapproved minutes stay drafts." />
+    <section className="panel">
+      <div className="panel-head"><h2>Decision log</h2><Search value={q} onChange={setQ} placeholder="Search decisions" /></div>
+      {list.length === 0 ? <Empty title="No decisions" text={rows.length ? undefined : "They appear once meeting minutes are drafted."} /> : (
+        <div className="table-x"><table className="tbl">
+          <thead><tr><th>ID</th><th>Decision</th><th>Made in</th><th>Status</th></tr></thead>
+          <tbody>{list.map((d) => (
+            <tr key={d.number}>
+              <td><Tag>D-{d.number}</Tag></td><td>{d.text}</td>
+              <td><Link className="cell-title" href={`/projects/${projectId}/meetings/${d.meetingId}`}>{d.meetingTitle}</Link><span className="cell-sub">{longDate(d.heldOn)}</span></td>
+              <td>{d.status === "Approved" ? <Tag tone="ok">Approved</Tag> : <Tag tone="warn">Awaiting approval</Tag>}</td>
+            </tr>
+          ))}</tbody>
+        </table></div>
+      )}
+    </section>
+  </>);
+}
+
+function AddMeeting({ projectId, onClose, onSaved, onManage }: { projectId: string; onClose: () => void; onSaved: () => void; onManage: () => void }) {
+  const router = useRouter();
+  const { rows: formats } = useFormats(projectId, "minutes");
+  const [title, setTitle] = useState("");
+  const [heldOn, setHeldOn] = useState(() => iso(new Date()));
+  const [notes, setNotes] = useState("");
+  const [mode, setMode] = useState<"paste" | "file">("paste");
+  const [format, setFormat] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function readFile(file: File) {
+    setBusy("Reading the file…"); setError(null);
     try {
-      await api<Meeting>(`/projects/${id}/meetings`, { method: "POST", body: form });
-      setForm({ title: "", heldOn: today(), notes: "" }); setAdding(false);
-      await load();
-    } catch (err) { setError((err as Error).message); }
-    setSaving(false);
+      const r = await uploadFile<{ text: string; trimmed: boolean }>("/transcripts/text", file);
+      setNotes(r.text); setMode("paste");
+      if (r.trimmed) setError("The file was long, so only the first 60,000 characters were kept.");
+    } catch (e) { setError((e as Error).message); }
+    setBusy(null);
   }
-  async function remove(mid: string) {
-    if (!window.confirm("Delete this meeting and its minutes?")) return;
-    try { await api(`/meetings/${mid}`, { method: "DELETE" }); await load(); } catch (e) { setError((e as Error).message); }
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    if (busy || !title.trim()) return;
+    setBusy("Saving…"); setError(null);
+    let m: Meeting;
+    try {
+      m = await api<Meeting>(`/projects/${projectId}/meetings`, { method: "POST", body: { title: title.trim(), heldOn, notes } });
+    } catch (err) { setError((err as Error).message); setBusy(null); return; }
+    // the meeting is saved from here on, so a later failure is shown on its page instead of saving it twice
+    let problem = "";
+    try {
+      if (format) await api(`/meetings/${m.id}/format`, { method: "PUT", body: { formatId: format } });
+      if (notes.trim()) { setBusy("Drafting minutes…"); await api(`/meetings/${m.id}/minutes`, { method: "POST" }); }
+    } catch (err) { problem = (err as Error).message; }
+    onSaved(); // close the pop-up before leaving, or it would still be open on coming back
+    router.push(`/projects/${projectId}/meetings/${m.id}${problem ? `?problem=${encodeURIComponent(problem)}` : ""}`);
   }
 
   return (
-    <>
-      <header className="topbar">
-        <Link href={`/projects/${id}`} className="muted">{project?.name ?? "Project"}</Link><span className="muted">/</span><h2>Meetings</h2>
-      </header>
-      <div className="page"><div className="page-inner wide pd">
-        <div className="pd-top">
-          <div><h1 className="pd-title">Meetings</h1><p className="pd-sub">Add a transcript, let Claude draft the minutes, then approve them. Approved decisions appear on the dashboard.</p></div>
-          <button className="pd-btn dark" onClick={() => setAdding((v) => !v)}>{adding ? "Cancel" : "＋ Add meeting"}</button>
+    <Modal title="Add a meeting" lead="DXA drafts the minutes from the transcript. Nothing is final until you approve them." onClose={() => { if (!busy) onClose(); }}>
+      <form onSubmit={(e) => void save(e)} style={{ display: "contents" }}>
+        <div className="form-grid">
+          <div><label htmlFor="m-title">Title</label><input id="m-title" className="field" required maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Weekly steering committee" /></div>
+          <div><label htmlFor="m-date">Date</label><input id="m-date" className="field" type="date" required value={heldOn} onChange={(e) => setHeldOn(e.target.value)} /></div>
         </div>
-        <FormatPanel projectId={id} kind="minutes" />
-        {error && <div className="note bad" role="alert">⚠ {error}</div>}
-        {adding && (
-          <form className="pd-card mt-form" onSubmit={(e) => void add(e)}>
-            <label className="mt-l">Title<input className="field" required maxLength={200} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="e.g. Steering Committee" /></label>
-            <label className="mt-l">Date<input className="field" type="date" required value={form.heldOn} onChange={(e) => setForm({ ...form, heldOn: e.target.value })} /></label>
-            <label className="mt-l">Transcript (English, বাংলা or both)<textarea className="field" rows={8} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Paste the transcript or notes here…" /></label>
-            <label className="mt-l">…or upload a .txt file<input className="field" type="file" accept=".txt,text/plain" onChange={(e) => { const f = e.target.files?.[0]; if (f) void f.text().then((t) => setForm((x) => ({ ...x, notes: t.slice(0, 60000) }))); }} /></label>
-            <div><button className="pd-btn dark" type="submit" disabled={saving || !form.title.trim()}>{saving ? "Saving…" : "Save meeting"}</button></div>
-          </form>
-        )}
-        {!meetings ? <p className="pd-muted">Loading…</p> : meetings.length === 0 && !adding ? <p className="empty">No meetings yet. Use Add meeting to start.</p>
-          : meetings.map((m) => <MeetingCard key={m.id} m={m} onChange={(n) => setMeetings((l) => l && l.map((x) => (x.id === n.id ? n : x)))} onDelete={() => void remove(m.id)} />)}
-      </div></div>
-    </>
+        <div>
+          <span className="form-label">Transcript</span>
+          <div className="chips-row">
+            <button type="button" className={`filter-chip${mode === "paste" ? " on" : ""}`} onClick={() => setMode("paste")}>Paste text</button>
+            <button type="button" className={`filter-chip${mode === "file" ? " on" : ""}`} onClick={() => setMode("file")}>Upload a file</button>
+            <button type="button" className="filter-chip" disabled title="Fathom is not connected">From Fathom</button>
+          </div>
+        </div>
+        {mode === "paste"
+          ? <textarea className="field" rows={7} maxLength={60000} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Paste the transcript or notes here…" aria-label="Transcript" />
+          : <input className="field" type="file" accept=".txt,.vtt,.docx" aria-label="Transcript file" onChange={(e) => { const f = e.target.files?.[0]; if (f) void readFile(f); }} />}
+        <span className="sub-text">English, Bangla or both. Files: .txt, .docx or .vtt</span>
+        <div>
+          <label htmlFor="m-format">Minutes format</label>
+          <select id="m-format" className="field" value={format} onChange={(e) => setFormat(e.target.value)}>
+            <option value="">{formats?.find((f) => f.isDefault)?.name ?? "Built-in format"} (default)</option>
+            <option value="builtin">Built-in format</option>
+            {formats?.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+          </select>
+          <button type="button" className="link-text" onClick={onManage}>Manage formats</button>
+        </div>
+        <ErrorNote error={error} />
+        <div className="dlg-actions">
+          <button type="button" className="ds-btn" disabled={!!busy} onClick={onClose}>Cancel</button>
+          <button type="submit" className="ds-btn primary" disabled={!!busy || !title.trim()}>{busy ?? (notes.trim() ? "Save and draft minutes" : "Save meeting")}</button>
+        </div>
+      </form>
+    </Modal>
   );
 }

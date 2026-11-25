@@ -1,112 +1,118 @@
 "use client";
 
+/** Reports (Figma RP-01), with the formats (RP-02) and automatic reports (RP-03) pop-ups. */
+
 import Link from "next/link";
 import { Suspense, useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
+import { FigmaIcon } from "@/components/FigmaIcon";
+import { useFormats } from "@/components/FormatPanel";
+import { FormatsModal } from "@/components/FormatsModal";
 import { useStore } from "@/components/Store";
-import { FormatPanel, FormatPicker } from "@/components/FormatPanel";
-import { PreviewModal } from "@/components/PreviewModal";
-import { ChatPanel } from "@/components/ChatPanel";
+import { Empty, ErrorNote, PageHead, SOON, Search, Section, Tag, longDate, shortDate } from "@/components/ui";
 import { api, reportUrl } from "@/lib/api";
 import { frequencyName, nextRunText } from "@/lib/schedule";
+import type { ReportMeta } from "@/lib/mock";
+
+type View = "all" | "draft" | "final";
+
+const TEMPLATES = [
+  { id: "progress", name: "Progress report", text: "Where the project stands today: health, phases, decisions and risks.", icon: "reports", ready: true },
+  { id: "quarterly", name: "Quarterly progress report", text: "A quarter against the plan.", icon: "overview" },
+  { id: "risk", name: "Risk report", text: "Current and new risks, overdue items.", icon: "risks" },
+  { id: "exec", name: "Executive summary", text: "One page on status and what needs attention.", icon: "file" },
+  { id: "research", name: "Research paper", text: "Drafted only from approved sources.", icon: "resources" },
+  { id: "briefing", name: "Briefing for senior officials", text: "A short, cited summary of policy documents.", icon: "files" },
+];
 
 function List() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const { projects, reports, refreshReports, openReportSettings } = useStore();
   const project = projects.find((p) => p.id === id);
   const mine = reports.filter((r) => r.projectId === id);
+  const { rows: formats, load: loadFormats } = useFormats(id, "report");
+  const [view, setView] = useState<View>("all");
+  const [q, setQ] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [modal, setModal] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => { void refreshReports(); }, [refreshReports]);
 
-  const [busy, setBusy] = useState<string | null>(null);
-  const [view, setView] = useState<{ id: string; label: string; pdf?: boolean } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [chat, setChat] = useState<{ id: string; label: string; v: number } | null>(null); // the draft being discussed with the AI
-  async function act(rid: string, kind: "approve" | "discard") {
-    if (kind === "discard" && !window.confirm("Discard this draft?")) return;
-    setBusy(rid); setError(null);
+  async function prepare() {
+    setBusy(true); setError(null);
     try {
-      await api(kind === "approve" ? `/reports/${rid}/approve` : `/reports/${rid}`, { method: kind === "approve" ? "POST" : "DELETE" });
+      const r = await api<ReportMeta>(`/projects/${id}/reports`, { method: "POST", body: {} });
       await refreshReports();
-    } catch (e) { setError((e as Error).message); }
-    setBusy(null);
+      setBusy(false);
+      router.push(`/projects/${id}/reports/${r.id}`);
+    } catch (e) { setError((e as Error).message); setBusy(false); }
   }
+
+  const shown = mine.filter((r) => (view === "all" || r.status === view) && r.periodLabel.toLowerCase().includes(q.trim().toLowerCase()));
+  const schedule = project?.reportSchedule;
   const drafts = mine.filter((r) => r.status === "draft").length;
 
   return (
-    <>
-      <header className="topbar">
-        <Link href={`/projects/${id}`} className="muted">{project?.name ?? "Project"}</Link>
-        <span className="muted">/</span>
-        <h2>Reports</h2>
-      </header>
-      <div className="page">
-        <div className="page-inner wide">
-          <div className="row between wrap-row">
-            <div>
-              <h1 className="k-title">Reports</h1>
-              <p className="k-sub">
-                Schedule: <strong>{frequencyName(project?.reportSchedule)}</strong>
-                {project?.reportSchedule?.enabled ? ` · ${nextRunText(project.reportSchedule)}` : ""}
-              </p>
-            </div>
-            <button className="btn" onClick={() => openReportSettings(id)}>🗓️ Report settings</button>
-          </div>
-
-          <FormatPanel projectId={id} kind="report" />
-          {error && <div className="note bad" role="alert">⚠ {error}</div>}
-          {drafts > 0 && <div className="note info">{drafts} draft{drafts === 1 ? "" : "s"} waiting. Review the PDF, then approve it to make it the final version.</div>}
-          {mine.length === 0 ? (
-            <p className="empty">No reports yet. Set a schedule in Report settings, or use Download report on the dashboard.</p>
-          ) : (
-            <div className="card table-card">
-              <div className="table-wrap">
-                <table>
-                  <thead><tr><th>Period</th><th>Created</th><th>Type</th><th>Status</th><th /></tr></thead>
-                  <tbody>
-                    {mine.map((r) => (
-                      <tr key={r.id}>
-                        <td><strong>{r.periodLabel}</strong></td>
-                        <td>{new Date(r.createdAt).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })}</td>
-                        <td><span className={`badge ${r.trigger === "scheduled" ? "badge-info" : "badge-ok"}`}>{r.trigger === "scheduled" ? "Scheduled" : "Manual"}</span></td>
-                        <td>{r.status === "draft" ? <span className="badge badge-warn">Draft · needs approval</span> : <span className="badge badge-ok">✔ Approved{r.approvedAt ? ` ${new Date(r.approvedAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}` : ""}</span>}</td>
-                        <td className="right">
-                          {r.canExport && <><FormatPicker projectId={id} kind="report" value={r.formatId ?? null} disabled={busy === r.id} onPick={(f) => { setBusy(r.id); void api(`/reports/${r.id}/format`, { method: "PUT", body: { formatId: f } }).then(() => refreshReports()).catch((e) => setError((e as Error).message)).finally(() => setBusy(null)); }} />{" "}</>}
-                          {r.canExport
-                            ? <><button className="btn" onClick={() => setView({ id: r.id, label: r.periodLabel })}>👁 Preview</button>{" "}<a className="btn" href={`/api/reports/${r.id}/docx`}>⬇ Word</a>{" "}</>
-                            : <><button className="btn" title="Shows the saved PDF. This report was made before Word export existed." onClick={() => setView({ id: r.id, label: r.periodLabel, pdf: true })}>👁 Preview</button>{" "}<button className="btn" disabled title="Word is available for reports made from now on.">⬇ Word</button>{" "}</>}
-                          <a className="btn" href={reportUrl(r.id)}>⬇ PDF{r.status === "draft" ? " draft" : ""}</a>
-                          {r.status === "draft" && <>{" "}<button className="btn" onClick={() => setChat({ id: r.id, label: r.periodLabel, v: 0 })}>✦ Ask AI to change</button>{" "}<button className="btn" disabled={busy === r.id} onClick={() => void act(r.id, "discard")}>Discard</button>{" "}<button className="btn primary" disabled={busy === r.id} onClick={() => void act(r.id, "approve")}>{busy === r.id ? "Saving…" : "Approve"}</button></>}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-          {chat && (
-            <div className="rv-scrim" onClick={() => { setChat(null); void refreshReports(); }}>
-              <div className="rv" role="dialog" aria-label={`Change report: ${chat.label}`} onClick={(e) => e.stopPropagation()}>
-                <div className="rv-head"><b>Report · {chat.label} (draft)</b>
-                  <span className="pd-actions"><button className="pd-btn" onClick={() => { setChat(null); void refreshReports(); }}>Done</button></span></div>
-                <ChatPanel<{ reply: string }> path={`/reports/${chat.id}/revise`} onResult={() => setChat((c) => c && { ...c, v: c.v + 1 })}
-                  hint="Change the text or the design (colours, font, sizes). Figures come from live data."
-                  examples={["Make it more colourful and professional", "Use dark blue headings and a serif font", "Make the summary shorter"]} />
-                <iframe key={chat.v} className="rv-frame" title="Draft report" src={`/api/reports/${chat.id}/download?inline=1&v=${chat.v}`} />
-              </div>
-            </div>
-          )}
-          {view && <PreviewModal title={`Report · ${view.label}`} previewPath={`/reports/${view.id}/preview`} pdfSrc={view.pdf ? `/api/reports/${view.id}/download?inline=1` : undefined} docxHref={`/api/reports/${view.id}/docx`} onClose={() => setView(null)} />}
+    <Section
+      crumbs={[{ label: "Reports" }, { label: view === "draft" ? "Needs approval" : view === "final" ? "Approved" : "All reports" }]}
+      active={view}
+      onSelect={(v) => (v === "formats" ? setModal(true) : v === "auto" ? openReportSettings(id) : setView(v as View))}
+      menu={[
+        { items: [{ id: "all", label: "All reports", icon: "reports", count: mine.length }] },
+        { title: "Status", items: [{ id: "draft", label: "Needs approval", icon: "clock", count: drafts }, { id: "final", label: "Approved", icon: "check", count: mine.length - drafts }] },
+        { title: "Setup", items: [{ id: "formats", label: "Report formats", icon: "file", count: formats?.length }, { id: "auto", label: "Automatic reports", icon: "calendar" }] },
+      ]}
+      actions={<button type="button" className="ds-btn sm primary" disabled={busy} onClick={() => void prepare()}>{busy ? "Preparing draft…" : "Prepare report"}</button>}
+    >
+      <PageHead title="Reports" lead="Drafts are built from current project data. You review and approve them." />
+      <ErrorNote error={error} />
+      <div className="two-cards">
+        <div className="setting-card">
+          <span className="tmpl-ic"><FigmaIcon name="file" size={20} /></span>
+          <div><strong>Report format</strong><span>{formats?.find((f) => f.isDefault)?.name ?? "Built-in format"} · default</span></div>
+          <button type="button" className="ds-btn sm" onClick={() => setModal(true)}>Manage formats</button>
+        </div>
+        <div className="setting-card">
+          <span className="tmpl-ic"><FigmaIcon name="calendar" size={20} /></span>
+          <div><strong>Automatic reports</strong><span>{frequencyName(schedule)}{schedule?.enabled ? ` · ${nextRunText(schedule)}` : ""}</span></div>
+          <button type="button" className="link-text" onClick={() => openReportSettings(id)}>Change</button>
         </div>
       </div>
-    </>
+      <h2 style={{ fontSize: 16, margin: 0 }}>Start from a template</h2>
+      <div className="tmpl-grid">
+        {TEMPLATES.map((t) => (
+          <button type="button" key={t.id} className="tmpl" disabled={!t.ready || busy} title={t.ready ? "Prepare this report" : SOON} onClick={() => void prepare()}>
+            <span className="tmpl-ic"><FigmaIcon name={t.icon} size={20} /></span><strong>{t.name}</strong><span>{t.text}</span>{!t.ready && <Tag>{SOON}</Tag>}
+          </button>
+        ))}
+      </div>
+      <section className="panel">
+        <div className="panel-head"><h2>Library</h2><Search value={q} onChange={setQ} placeholder="Search by period" /></div>
+        {shown.length === 0 ? <Empty title={mine.length ? "No reports here" : "No reports yet"} text={mine.length ? undefined : "Choose Prepare report, or set up automatic reports."} /> : (
+          <div className="table-x"><table className="tbl">
+            <thead><tr><th>Report</th><th>Period</th><th>Status</th><th>Created</th><th>Export</th></tr></thead>
+            <tbody>{shown.map((r) => (
+              <tr key={r.id}>
+                <td><Link className="cell-title" href={`/projects/${id}/reports/${r.id}`}>Progress report</Link><span className="cell-sub">{r.trigger === "scheduled" ? "Automatic" : "Prepared by hand"}</span></td>
+                <td>{r.periodLabel}</td>
+                <td>{r.status === "draft" ? <Tag tone="ai">Draft to review</Tag> : <Tag tone="ok">Approved{r.approvedAt ? ` ${shortDate(r.approvedAt)}` : ""}</Tag>}</td>
+                <td>{longDate(r.createdAt)}</td>
+                <td>{r.status === "draft" ? <span className="sub-text">After approval</span> : <>{r.canExport && <><a className="link-text" href={`/api/reports/${r.id}/docx`}>Word</a> · </>}<a className="link-text" href={reportUrl(r.id)}>PDF</a></>}</td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        )}
+      </section>
+      {modal && <FormatsModal projectId={id} initial="report" onClose={() => { setModal(false); void loadFormats(); }} />}
+    </Section>
   );
 }
 
 export function ReportsList() {
   return (
-    <Suspense fallback={<div className="page"><div className="page-inner muted">Loading…</div></div>}>
+    <Suspense fallback={<div className="section-body">Loading…</div>}>
       <List />
     </Suspense>
   );

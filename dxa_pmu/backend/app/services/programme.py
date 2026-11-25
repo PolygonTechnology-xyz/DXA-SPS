@@ -78,6 +78,8 @@ def phases(project: Project) -> list[Phase]:
             out.append(Phase(e["summary"], pct, done, len(kids), e.get("due")))
     if not out:
         for m in project.milestones or []:
+            if m.get("source") == "setup":
+                continue  # a date to reach, with no tasks to measure progress by
             total, done = m.get("total") or 0, m.get("doneTasks") or 0
             out.append(Phase(m["title"], 100 if m.get("done") else (round(done / total * 100) if total else 0), done, total, m.get("due")))
     return sorted(out, key=lambda p: (p.due or "9999", p.name))

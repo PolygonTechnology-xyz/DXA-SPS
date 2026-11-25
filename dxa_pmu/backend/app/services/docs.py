@@ -54,12 +54,20 @@ def default_template(kind: str) -> bytes:
             info.cell(i, 0).text, info.cell(i, 1).text = k, v
         d.add_heading("Summary", 1)
         d.add_paragraph("{{ summary }}")
+        d.add_heading("Key outcomes", 1)
+        d.add_paragraph("{%p for o in key_outcomes %}")
+        d.add_paragraph("• {{ o }}")
+        d.add_paragraph("{%p endfor %}")
         d.add_heading("Decisions", 1)
         d.add_paragraph("{%p for d in decisions %}")
         d.add_paragraph("{{ loop.index }}. {{ d }}")
         d.add_paragraph("{%p endfor %}")
         d.add_heading("Actions", 1)
-        _row_table(d, ["Action", "Owner"], ["{{ a.what }}", "{{ a.owner }}"], "a in actions")
+        _row_table(d, ["Action", "Owner", "Due"], ["{{ a.what }}", "{{ a.owner }}", "{{ a.due }}"], "a in actions")
+        d.add_heading("Open questions", 1)
+        d.add_paragraph("{%p for q in open_questions %}")
+        d.add_paragraph("• {{ q }}")
+        d.add_paragraph("{%p endfor %}")
         d.add_heading("Risks", 1)
         _row_table(d, ["Risk", "If not done", "Impact", "Severity", "Owner"],
                    ["{{ r.title }}", "{{ r.if_not_done }}", "{{ r.impact }}", "{{ r.severity }}", "{{ r.owner }}"], "r in risks")
@@ -105,7 +113,8 @@ def minutes_context(m: Meeting, project: Project | None) -> dict[str, Any]:
         "summary": mn.get("summary", ""), "decisions": mn.get("decisions", []),
         "risks": [{"title": r.get("title", ""), "if_not_done": r.get("if_not_done", ""), "impact": r.get("impact", ""),
                    "severity": (r.get("severity") or "").title(), "owner": r.get("owner") or "-"} for r in mn.get("risks", [])],
-        "actions": [{"what": a.get("what", ""), "owner": a.get("owner") or "-"} for a in mn.get("actions", [])],
+        "actions": [{"what": a.get("what", ""), "owner": a.get("owner") or "-", "due": a.get("due") or "-"} for a in mn.get("actions", [])],
+        "key_outcomes": mn.get("key_outcomes", []), "open_questions": mn.get("open_questions", []),
         "transcript": m.notes, "generated": date.today().strftime("%d %b %Y"),
     }
 
@@ -121,7 +130,8 @@ SAMPLE = {
                 "summary": "The committee reviewed provider onboarding and agreed the pilot timeline.",
                 "decisions": ["The wave 2 checklist deadline moves to 30 January.", "A provider support desk will run for one month."],
                 "risks": [{"title": "Outstanding providers miss the deadline", "if_not_done": "the remaining API integrations are not finished", "impact": "wave 2 certification slips by two weeks", "severity": "High", "owner": "Nasrin"}],
-                "actions": [{"what": "Set up the provider support desk", "owner": "Imran"}, {"what": "Send the budget request", "owner": "Nasrin"}],
+                "actions": [{"what": "Set up the provider support desk", "owner": "Imran", "due": "2026-01-22"}, {"what": "Send the budget request", "owner": "Nasrin", "due": "-"}],
+                "key_outcomes": ["Provider onboarding is on track for the pilot."], "open_questions": ["Who signs off the support desk budget?"],
                 "transcript": "", "generated": "15 Jan 2026"},
     "report": {"project": "Payments Platform", "jira_key": "PAY", "period": "Snapshot, 15 Jan 2026", "generated": "15 Jan 2026", "status": "Approved",
                "summary": "11 of 29 tasks are complete (38%). Three tasks are overdue and need attention.", "headline": "11 of 29 tasks complete.", "score": 62, "band": "Watch",

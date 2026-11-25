@@ -28,7 +28,7 @@ async def upload_document(request: Request, p: Project = Depends(get_project), d
     name = unquote(request.headers.get("x-file-name", "document"))[:200]
     data = await request.body()
     if len(data) > documents.MAX_BYTES:
-        raise HTTPException(413, "That file is larger than 10 MB.")
+        raise HTTPException(413, "That file is larger than 25 MB.")
     try:
         text = documents.extract(name, data)
     except documents.DocProblem as e:

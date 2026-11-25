@@ -1,5 +1,5 @@
-import { CreateChat } from "@/components/CreateChat";
+import { NewProject } from "@/components/NewProject";
 
 export default function CreateProject() {
-  return <CreateChat title="Create Project" />;
+  return <NewProject />;
 }

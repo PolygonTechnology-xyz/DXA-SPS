@@ -1,15 +1,16 @@
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..models import Meeting, Project
-from ..schemas import ReviseIn, FormatChoice, DecisionOut, MeetingIn, MeetingOut, MinutesIO, ReviseOut
-from ..services import ai, chat, docs, register
+from ..schemas import ReviseIn, FormatChoice, DecisionOut, MeetingIn, MeetingOut, MinutesIO, ReviseOut, TranscriptIn
+from ..services import ai, chat, docs, documents, register
 from ..services import style as docstyle
 from .projects import get_project
 
@@ -38,16 +39,47 @@ def recent_decisions(limit: int = 6, p: Project = Depends(get_project), db: Sess
     """Decisions from the project's meeting minutes, newest meeting first. Decisions in approved minutes are
     "Approved"; those in a draft are "Under review"."""
     rows = db.scalars(select(Meeting).where(Meeting.project_id == p.id, Meeting.minutes.is_not(None))
-                      .order_by(Meeting.held_on.desc(), Meeting.created_at.desc())).all()
-    out = [DecisionOut(text=d, meeting_id=m.id, meeting_title=m.title, held_on=m.held_on, status="Approved" if m.approved_at else "Under review")
-           for m in rows for d in (m.minutes or {}).get("decisions", [])]
-    return out[: max(1, min(limit, 50))]
+                      .order_by(Meeting.held_on, Meeting.created_at)).all()
+    found = [(m, d) for m in rows for d in (m.minutes or {}).get("decisions", [])]
+    out = [DecisionOut(number=n, text=d, meeting_id=m.id, meeting_title=m.title, held_on=m.held_on, status="Approved" if m.approved_at else "Under review")
+           for n, (m, d) in enumerate(found, 1)]
+    return out[::-1][: max(1, min(limit, 500))]
 
 
 @router.post("/projects/{project_id}/meetings", response_model=MeetingOut, response_model_by_alias=True, status_code=201)
 def create_meeting(body: MeetingIn, p: Project = Depends(get_project), db: Session = Depends(get_db)):
     m = Meeting(id=str(uuid.uuid4()), project_id=p.id, title=body.title.strip(), held_on=body.held_on, notes=body.notes)
     db.add(m)
+    db.commit()
+    return _out(m)
+
+
+@router.post("/transcripts/text")
+async def transcript_text(request: Request):
+    """The text of a transcript file (.txt, .vtt or .docx), so it can be checked before the meeting is saved."""
+    from urllib.parse import unquote
+    name = unquote(request.headers.get("x-file-name", "transcript.txt"))[:200].lower()
+    data = bytearray()
+    async for chunk in request.stream():
+        data += chunk
+        if len(data) > documents.MAX_BYTES:
+            raise HTTPException(413, "That file is larger than 25 MB.")
+    if not name.endswith((".txt", ".vtt", ".docx")):
+        raise HTTPException(422, "Use a .txt, .vtt or .docx transcript.")
+    try:  # subtitle files are plain text
+        text = await run_in_threadpool(documents.extract, name[:-4] + ".txt" if name.endswith(".vtt") else name, bytes(data))
+    except documents.DocProblem as e:
+        raise HTTPException(422, str(e)) from None
+    return {"text": text[:60000], "trimmed": len(text) > 60000}
+
+
+@router.put("/meetings/{meeting_id}/transcript", response_model=MeetingOut, response_model_by_alias=True)
+def set_transcript(meeting_id: str, body: TranscriptIn, db: Session = Depends(get_db)):
+    """Adds or corrects a meeting's transcript. Minutes that are already approved keep the transcript they were made from."""
+    m = _meeting(db, meeting_id)
+    if m.approved_at:
+        raise HTTPException(409, "The transcript of approved minutes can't be changed.")
+    m.notes = body.notes
     db.commit()
     return _out(m)
 
@@ -67,9 +99,22 @@ def draft_minutes(meeting_id: str, db: Session = Depends(get_db)):
         raise HTTPException(400, "Add the meeting notes first, so there is something to write minutes from.")
     project = db.get(Project, m.project_id)
     d = ai.draft_minutes(project.name if project else "", m.title, m.held_on, m.notes)
-    m.minutes = MinutesIO(summary=d.summary, decisions=d.decisions, actions=[a.model_dump() for a in d.actions], risks=[r.model_dump() for r in d.risks]).model_dump()
+    m.minutes = MinutesIO.model_validate(d.model_dump()).model_dump()
     m.ai_generated, m.approved_at = True, None
-    register.sync_meeting(db, m)  # the AI decides which risks the meeting raised; they go straight into the register
+    register.sync_meeting(db, m)  # risks the meeting raised become suggestions to confirm
+    db.commit()
+    return _out(m)
+
+
+@router.delete("/meetings/{meeting_id}/minutes", response_model=MeetingOut, response_model_by_alias=True)
+def reject_minutes(meeting_id: str, db: Session = Depends(get_db)):
+    """Throws away a draft and its unconfirmed risk suggestions. The transcript stays. Approved minutes are a record."""
+    m = _meeting(db, meeting_id)
+    if m.approved_at:
+        raise HTTPException(409, "Approved minutes are a record and can't be rejected.")
+    m.minutes, m.ai_generated = None, False
+    register.sync_meeting(db, m)
+    chat.clear(db, "minutes", m.id)
     db.commit()
     return _out(m)
 
@@ -89,8 +134,7 @@ def revise_minutes(meeting_id: str, body: ReviseIn, db: Session = Depends(get_db
         raise HTTPException(409, "Draft the minutes first, then ask for changes.")
     project = db.get(Project, m.project_id)
     r = ai.revise_minutes(project.name if project else "", m.title, m.notes, current, docstyle.resolve(m.style).model_dump(), chat.history(db, "minutes", m.id), body.message)
-    out = MinutesIO(summary=r.minutes.summary, decisions=r.minutes.decisions,
-                    actions=[a.model_dump() for a in r.minutes.actions], risks=[x.model_dump() for x in r.minutes.risks])
+    out = MinutesIO.model_validate(r.minutes.model_dump())
     if not m.approved_at:  # an approved record is only replaced by approving again
         m.minutes = out.model_dump()
         register.sync_meeting(db, m)

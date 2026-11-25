@@ -29,6 +29,13 @@ def init_db() -> None:
     from sqlalchemy import text
     with engine.begin() as c:
         c.execute(text("DROP TABLE IF EXISTS jira_mappings"))
+        c.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS phases JSON"))
+        for column in ("number INTEGER", "likelihood VARCHAR(10)", "impact VARCHAR(10)", "trend VARCHAR(10)"):
+            c.execute(text(f"ALTER TABLE risk_register ADD COLUMN IF NOT EXISTS {column}"))
+        # risks that existed before numbering get numbers in the order they were added
+        c.execute(text("UPDATE risk_register r SET number = n.n FROM (SELECT id, COALESCE((SELECT MAX(number) FROM risk_register m WHERE m.project_id = u.project_id), 0) "
+                       "+ ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY created_at, id) AS n FROM risk_register u WHERE number IS NULL) n WHERE r.id = n.id"))
+        c.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS budget_text VARCHAR(120)"))
         c.execute(text("ALTER TABLE risk_register ADD COLUMN IF NOT EXISTS source_ref VARCHAR(300)"))
         c.execute(text("ALTER TABLE reports ADD COLUMN IF NOT EXISTS status VARCHAR(10) NOT NULL DEFAULT 'final'"))
         c.execute(text("ALTER TABLE reports ADD COLUMN IF NOT EXISTS final_pdf BYTEA"))

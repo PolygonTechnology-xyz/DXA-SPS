@@ -8,9 +8,9 @@ import re
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..models import Project, ProjectDoc
+from ..models import Project, ProjectDoc, SharedDoc
 
-MAX_BYTES = 10 * 1024 * 1024
+MAX_BYTES = 25 * 1024 * 1024
 MAX_CHARS = 200_000          # kept per document
 AI_BUDGET = 30_000           # characters of documents given to the AI in one call
 TYPES = (".pdf", ".docx", ".txt", ".md", ".csv")
@@ -54,8 +54,10 @@ def sync_names(db: Session, project: Project) -> None:
 
 def for_ai(db: Session, project_id: str) -> list[dict[str, str]]:
     """The documents' text, shared fairly between files and trimmed to a budget."""
-    rows = db.scalars(select(ProjectDoc).where(ProjectDoc.project_id == project_id).order_by(ProjectDoc.uploaded_at)).all()
+    own = db.scalars(select(ProjectDoc).where(ProjectDoc.project_id == project_id).order_by(ProjectDoc.uploaded_at)).all()
+    shared = db.scalars(select(SharedDoc).order_by(SharedDoc.uploaded_at)).all()
+    rows = [(r.name, r.text) for r in own] + [(f"{r.name} (shared {r.category.lower()} for all projects)", r.text) for r in shared]
     if not rows:
         return []
-    each = max(2000, AI_BUDGET // len(rows))
-    return [{"file": r.name, "text": r.text[:each] + (" [trimmed]" if len(r.text) > each else "")} for r in rows]
+    each = max(1000, AI_BUDGET // len(rows))
+    return [{"file": name, "text": text[:each] + (" [trimmed]" if len(text) > each else "")} for name, text in rows]

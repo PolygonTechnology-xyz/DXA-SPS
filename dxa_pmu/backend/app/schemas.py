@@ -48,6 +48,7 @@ class Milestone(Camel):
     done: bool = False
     total: int = 0  # tasks tagged with this version in Jira
     done_tasks: int = 0
+    source: str | None = None  # "setup" for ones confirmed when the project was created; None for Jira versions
 
 
 class ProjectOut(Camel):
@@ -62,17 +63,35 @@ class ProjectOut(Camel):
     start_date: str | None = None
     end_date: str | None = None
     budget: int | None = None
+    budget_text: str | None = None
+    phases: list[str] = []
     milestones: list[Milestone] = []
     files: list[str] = []
+    score: int | None = None  # the DXA health score; null until there are Jira tasks
     jira: JiraInfo | None = None
     tasks: list[JiraTaskOut] | None = None
     synced_at: datetime | None = None
     report_schedule: ReportSchedule | None = None
 
 
+SETUP_DATE = r"^\d{4}-(0[1-9]|1[0-2])(-(0[1-9]|[12]\d|3[01]))?$"  # a month, or a full day
+FULL_DATE = r"^(\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01]))?$"  # a full day, or empty
+
+
+class MilestoneIn(Camel):
+    title: str = Field(min_length=1, max_length=200)
+    due: str = Field("", pattern=FULL_DATE)
+
+
 class ProjectCreate(Camel):
     name: str = Field(min_length=1, max_length=200)
     goal: str = Field("", max_length=5000)
+    manager: str | None = Field(None, max_length=120)
+    start_date: str | None = Field(None, pattern=SETUP_DATE)
+    end_date: str | None = Field(None, pattern=SETUP_DATE)
+    budget_text: str | None = Field(None, max_length=120)
+    phases: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field(default=[], max_length=40)
+    milestones: list[MilestoneIn] = Field(default=[], max_length=100)
 
 
 class ProjectPatch(Camel):
@@ -249,6 +268,7 @@ class ActionsOut(Camel):
 class MeetingActionIO(Camel):
     what: str = Field(max_length=500)
     owner: str | None = Field(None, max_length=120)
+    due: str | None = Field(None, max_length=10)
 
 
 class MeetingRiskIO(Camel):
@@ -257,6 +277,8 @@ class MeetingRiskIO(Camel):
     impact: str = Field(default="", max_length=1000)
     severity: Literal["high", "medium", "low"] = "medium"
     owner: str | None = Field(None, max_length=120)
+    likelihood: Literal["high", "medium", "low"] | None = None
+    impact_level: Literal["high", "medium", "low"] | None = None
 
 
 class MinutesIO(Camel):
@@ -264,12 +286,18 @@ class MinutesIO(Camel):
     risks: list[MeetingRiskIO] = Field(default_factory=list, max_length=30)
     decisions: list[Annotated[str, Field(max_length=1000)]] = Field(default_factory=list, max_length=50)
     actions: list[MeetingActionIO] = Field(default_factory=list, max_length=50)
+    key_outcomes: list[Annotated[str, Field(max_length=1000)]] = Field(default_factory=list, max_length=30)
+    open_questions: list[Annotated[str, Field(max_length=1000)]] = Field(default_factory=list, max_length=30)
 
 
 class MeetingIn(Camel):
     title: str = Field(min_length=1, max_length=200)
     held_on: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
     notes: str = Field(default="", max_length=60000)
+
+
+class TranscriptIn(Camel):
+    notes: str = Field(max_length=60000)
 
 
 class MeetingOut(Camel):
@@ -285,11 +313,16 @@ class MeetingOut(Camel):
 
 
 class DecisionOut(Camel):
+    number: int  # D-1 is the oldest decision
     text: str
     meeting_id: str
     meeting_title: str
     held_on: str
     status: Literal["Approved", "Under review"]
+
+
+Level = Literal["high", "medium", "low"]
+Trend = Literal["rising", "steady", "falling"]
 
 
 class RegisterIn(Camel):
@@ -301,6 +334,9 @@ class RegisterIn(Camel):
     owner: str | None = Field(default=None, max_length=120)
     due: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
     task_keys: list[str] = Field(default=[], max_length=30)
+    likelihood: Level | None = None
+    impact: Level | None = None
+    trend: Trend | None = None
 
 
 class RegisterPatch(Camel):
@@ -311,6 +347,9 @@ class RegisterPatch(Camel):
     status: Literal["open", "mitigating", "accepted", "closed"] | None = None
     owner: str | None = Field(default=None, max_length=120)
     due: str | None = Field(default=None, pattern=r"^(\d{4}-\d{2}-\d{2})?$")
+    likelihood: Level | None = None
+    impact: Level | None = None
+    trend: Trend | None = None
 
 
 class RegisterOut(Camel):
@@ -319,7 +358,11 @@ class RegisterOut(Camel):
     description: str
     mitigation: str
     severity: Literal["high", "medium", "low"]
-    status: Literal["open", "mitigating", "accepted", "closed"]
+    status: Literal["suggested", "open", "mitigating", "accepted", "closed"]
+    number: int | None = None
+    likelihood: str | None = None
+    impact: str | None = None
+    trend: str | None = None
     owner: str | None = None
     due: str | None = None
     task_keys: list[str] = []
@@ -347,3 +390,47 @@ class ReviseOut(Camel):
 
 class FormatChoice(Camel):
     format_id: str | None = None  # a format id, "builtin", or null for "use the project default"
+
+
+class DraftValue(Camel):
+    value: str | None = Field(None, max_length=5000)
+    pages: list[int] = Field(default=[], max_length=50)
+
+
+class DraftMilestone(Camel):
+    title: str = Field(max_length=200)
+    due: str | None = Field(None, max_length=10)
+
+
+class ProjectDraft(Camel):
+    """A new project's setup before it is created. Nothing here is saved."""
+
+    name: DraftValue = Field(default_factory=DraftValue)
+    goal: DraftValue = Field(default_factory=DraftValue)
+    manager: DraftValue = Field(default_factory=DraftValue)
+    start: DraftValue = Field(default_factory=DraftValue)
+    end: DraftValue = Field(default_factory=DraftValue)
+    budget: DraftValue = Field(default_factory=DraftValue)
+    phases: list[str] = Field(default=[], max_length=40)
+    phase_pages: list[int] = []
+    milestones: list[DraftMilestone] = Field(default=[], max_length=100)
+    milestone_pages: list[int] = []
+
+
+class DraftDocumentOut(Camel):
+    draft: ProjectDraft
+    file_name: str
+    size: int
+    pages: int | None = None  # null for files without pages (Word, text)
+    pages_read: int | None = None
+    trimmed: bool = False  # true when the file was too long to be read completely
+
+
+class DraftChatIn(Camel):
+    messages: list[ChatMessage] = Field(min_length=1, max_length=50)
+    draft: ProjectDraft = Field(default_factory=ProjectDraft)
+
+
+class DraftChatOut(Camel):
+    reply: str
+    draft: ProjectDraft

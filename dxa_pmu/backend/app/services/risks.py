@@ -162,7 +162,7 @@ def compute(project: Project, today: date | None = None, guidance: list[str] | N
         data["overview"] = rep.overview
         data["risks"] = sorted(
             ({"title": r.title, "severity": r.severity, "rationale": r.rationale, "mitigation": r.mitigation,
-              "taskKeys": [k for k in r.task_keys if k in known]} for r in rep.risks),
+              "taskKeys": [k for k in r.task_keys if k in known], "likelihood": r.likelihood, "impact": r.impact} for r in rep.risks),
             key=lambda r: SEV[r["severity"]],
         )
         data["registerLinks"] = [{"title": l.title, "taskKeys": [k for k in l.task_keys if k in known]} for l in rep.register_links]
@@ -212,7 +212,7 @@ def generate(db: Session, project: Project, today: date | None = None, guidance:
     else:
         db.add(RiskAnalysis(project_id=project.id, input_hash=h, data=data, created_at=now))
     if data["aiGenerated"]:
-        sync_analysis(db, project.id, data["risks"], data.get("registerLinks", []))  # the AI's risks go straight into the register
+        sync_analysis(db, project.id, data["risks"], data.get("registerLinks", []))  # as suggestions a person confirms
     db.commit()
     return {**data, "status": "ready", "generatedAt": now, **_approval_view(db, project.id, now)}
 

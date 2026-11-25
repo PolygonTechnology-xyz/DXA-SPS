@@ -35,3 +35,17 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
 }
 
 export const reportUrl = (id: string) => `/api/reports/${id}/download`;
+
+/** Sends a file as the request body with its name in a header, which is how the backend takes uploads. */
+export async function uploadFile<T>(path: string, file: File, signal?: AbortSignal): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(`/api${path}`, { method: "POST", headers: { "X-File-Name": encodeURIComponent(file.name) }, body: file, signal });
+  } catch (e) {
+    if (signal?.aborted) throw e;
+    throw new ApiError(0, "Could not reach the app server. Check that it is running and try again.");
+  }
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new ApiError(res.status, typeof data?.detail === "string" ? data.detail : "The upload failed. Please try again.");
+  return data as T;
+}

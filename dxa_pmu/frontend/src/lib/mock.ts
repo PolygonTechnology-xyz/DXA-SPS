@@ -22,7 +22,7 @@ export interface JiraTask {
 export type DxaState = "new" | "indeterminate" | "done";
 
 
-export interface Milestone { title: string; due: string; done: boolean; total?: number; doneTasks?: number }
+export interface Milestone { title: string; due: string; done: boolean; total?: number; doneTasks?: number; source?: string | null }
 
 export interface ActionItem {
   key: string;
@@ -81,9 +81,15 @@ export interface Project {
   startDate?: string;
   endDate?: string;
   budget?: number;
+  /** The budget as written in the plan, with its currency. */
+  budgetText?: string | null;
+  /** Phase names confirmed when the project was set up. */
+  phases?: string[];
   milestones: Milestone[];
   jira?: { site: string; key: string; name: string };
   files: string[];
+  /** The DXA health score; null until there are Jira tasks. */
+  score?: number | null;
   /** Tasks pulled from Jira when it was connected. */
   tasks?: JiraTask[];
   /** ISO time the Jira tasks were last fetched. */
@@ -91,10 +97,10 @@ export interface Project {
   reportSchedule?: ReportSchedule;
 }
 
-export interface KnowledgeDoc {
+export interface SharedDoc {
   id: string;
   name: string;
-  size: string;
+  size: number;
   category: string;
   tags: string[];
   uploadedAt: string;
@@ -103,13 +109,6 @@ export interface KnowledgeDoc {
 export const STATUSES: ProjectStatus[] = ["Planning", "Active", "On hold", "Completed"];
 
 export const CATEGORIES = ["Policy", "Template", "Guideline", "Report", "Other"];
-
-export const mockKnowledge: KnowledgeDoc[] = [
-  { id: "k-1", name: "PMU Operating Manual.pdf", size: "2.4 MB", category: "Guideline", tags: ["onboarding", "governance"], uploadedAt: "2026-08-04" },
-  { id: "k-2", name: "Procurement Policy 2026.pdf", size: "860 KB", category: "Policy", tags: ["procurement", "compliance"], uploadedAt: "2026-07-19" },
-  { id: "k-3", name: "Project Charter Template.docx", size: "48 KB", category: "Template", tags: ["charter", "initiation"], uploadedAt: "2026-06-02" },
-  { id: "k-4", name: "Quarterly Status Report Q2.xlsx", size: "310 KB", category: "Report", tags: ["reporting", "q2"], uploadedAt: "2026-07-05" },
-];
 
 export interface RiskItem {
   title: string;
@@ -147,8 +146,16 @@ export interface SummaryDraft {
 
 export interface SummaryApproved extends SummaryDraft { approvedAt: string }
 
-export interface MeetingRisk { title: string; ifNotDone: string; impact: string; severity: "high" | "medium" | "low"; owner: string | null }
-export interface Minutes { summary: string; decisions: string[]; actions: { what: string; owner: string | null }[]; risks?: MeetingRisk[] }
+export type Level = "high" | "medium" | "low";
+export interface MeetingRisk { title: string; ifNotDone: string; impact: string; severity: Level; owner: string | null; likelihood?: Level | null; impactLevel?: Level | null }
+export interface Minutes {
+  summary: string;
+  decisions: string[];
+  actions: { what: string; owner: string | null; due?: string | null }[];
+  risks?: MeetingRisk[];
+  keyOutcomes?: string[];
+  openQuestions?: string[];
+}
 
 export interface Meeting {
   id: string;
@@ -162,7 +169,7 @@ export interface Meeting {
   formatId?: string | null;
 }
 
-export interface Decision { text: string; meetingId: string; meetingTitle: string; heldOn: string; status: "Approved" | "Under review" }
+export interface Decision { number: number; text: string; meetingId: string; meetingTitle: string; heldOn: string; status: "Approved" | "Under review" }
 
 export interface RegisterRisk {
   id: string;
@@ -170,7 +177,11 @@ export interface RegisterRisk {
   description: string;
   mitigation: string;
   severity: "high" | "medium" | "low";
-  status: "open" | "mitigating" | "accepted" | "closed";
+  status: "suggested" | "open" | "mitigating" | "accepted" | "closed";
+  number: number | null;
+  likelihood: Level | null;
+  impact: Level | null;
+  trend: "rising" | "steady" | "falling" | null;
   owner: string | null;
   due: string | null;
   taskKeys: string[];
@@ -181,4 +192,17 @@ export interface RegisterRisk {
   needsIntervention: boolean;
   reasons: string[];
   evidence: { key: string; summary: string; status: string; assignee: string | null; due: string | null; daysOverdue: number | null }[];
+}
+
+/** A new project's setup before it is created. `pages` are the document pages a value was read from. */
+export interface DraftValue { value: string | null; pages: number[] }
+export interface DraftMilestone { title: string; due: string | null }
+export interface ProjectDraft {
+  name: DraftValue; goal: DraftValue; manager: DraftValue; start: DraftValue; end: DraftValue; budget: DraftValue;
+  phases: string[]; phasePages: number[];
+  milestones: DraftMilestone[]; milestonePages: number[];
+}
+export interface NewProjectInput {
+  name: string; goal: string; manager?: string | null; startDate?: string | null; endDate?: string | null; budgetText?: string | null;
+  phases?: string[]; milestones?: { title: string; due: string }[];
 }
